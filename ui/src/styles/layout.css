@@ -396,6 +396,11 @@
   margin-bottom: 0;
 }
 
+/* In collapsed sidebar, always show nav items (icon-only) regardless of group collapse state */
+.sidebar--collapsed .nav-group--collapsed .nav-group__items {
+  display: grid;
+}
+
 .sidebar--collapsed .nav-item {
   justify-content: center;
   width: 44px;
