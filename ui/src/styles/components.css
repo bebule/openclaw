@@ -3550,6 +3550,82 @@
   animation-delay: 150ms;
 }
 
+/* ── Attention items ── */
+.ov-attention-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ov-attention-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+}
+
+.ov-attention-item.warn {
+  border-color: var(--warning-subtle, rgba(234, 179, 8, 0.2));
+  background: rgba(234, 179, 8, 0.05);
+}
+
+.ov-attention-item.danger {
+  border-color: var(--danger-subtle, rgba(239, 68, 68, 0.2));
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.ov-attention-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  margin-top: 1px;
+}
+
+.ov-attention-item.warn .ov-attention-icon {
+  color: var(--warning, #eab308);
+}
+
+.ov-attention-item.danger .ov-attention-icon {
+  color: var(--danger, #ef4444);
+}
+
+.ov-attention-icon svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ov-attention-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-attention-title {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.ov-attention-link {
+  font-size: 12px;
+  color: var(--accent, #3b82f6);
+  text-decoration: none;
+}
+
+.ov-attention-link:hover {
+  text-decoration: underline;
+}
+
 /* Recent sessions widget */
 .ov-recent {
   margin-top: 18px;
