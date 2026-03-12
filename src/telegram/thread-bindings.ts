@@ -62,8 +62,24 @@ export type TelegramThreadBindingManager = {
   stop: () => void;
 };
 
-const MANAGERS_BY_ACCOUNT_ID = new Map<string, TelegramThreadBindingManager>();
-const BINDINGS_BY_ACCOUNT_CONVERSATION = new Map<string, TelegramThreadBindingRecord>();
+type TelegramThreadBindingsState = {
+  managersByAccountId: Map<string, TelegramThreadBindingManager>;
+  bindingsByAccountConversation: Map<string, TelegramThreadBindingRecord>;
+};
+
+/**
+ * Keep Telegram thread binding state shared across bundled chunks so routing,
+ * binding lookups, and binding mutations all observe the same live registry.
+ */
+const _g = globalThis as typeof globalThis & {
+  __openclaw_telegram_thread_bindings_state__?: TelegramThreadBindingsState;
+};
+const threadBindingsState = (_g.__openclaw_telegram_thread_bindings_state__ ??= {
+  managersByAccountId: new Map<string, TelegramThreadBindingManager>(),
+  bindingsByAccountConversation: new Map<string, TelegramThreadBindingRecord>(),
+});
+const MANAGERS_BY_ACCOUNT_ID = threadBindingsState.managersByAccountId;
+const BINDINGS_BY_ACCOUNT_CONVERSATION = threadBindingsState.bindingsByAccountConversation;
 
 function normalizeDurationMs(raw: unknown, fallback: number): number {
   if (typeof raw !== "number" || !Number.isFinite(raw)) {
