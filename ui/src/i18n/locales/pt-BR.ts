@@ -147,10 +147,6 @@ export const pt_BR: TranslationMap = {
       refreshAll: "Atualizar Tudo",
       terminal: "Terminal",
     },
-    streamMode: {
-      active: "Modo stream — valores ocultos",
-      disable: "Desativar",
-    },
     palette: {
       placeholder: "Digite um comando…",
       noResults: "Sem resultados",

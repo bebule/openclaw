@@ -630,7 +630,6 @@ export function renderApp(state: AppViewState) {
                 attentionItems: state.attentionItems,
                 eventLog: state.eventLog,
                 overviewLogLines: state.overviewLogLines,
-                streamMode: state.streamMode,
                 showGatewayToken: state.overviewShowGatewayToken,
                 showGatewayPassword: state.overviewShowGatewayPassword,
                 onSettingsChange: (next) => state.applySettings(next),
@@ -656,14 +655,6 @@ export function renderApp(state: AppViewState) {
                 onRefresh: () => state.loadOverview(),
                 onNavigate: (tab) => state.setTab(tab as import("./navigation.ts").Tab),
                 onRefreshLogs: () => state.loadOverview(),
-                onToggleStreamMode: () => {
-                  state.streamMode = !state.streamMode;
-                  try {
-                    localStorage.setItem("openclaw:stream-mode", String(state.streamMode));
-                  } catch {
-                    /* */
-                  }
-                },
               })
             : nothing
         }
@@ -717,7 +708,6 @@ export function renderApp(state: AppViewState) {
                   entries: state.presenceEntries,
                   lastError: state.presenceError,
                   statusMessage: state.presenceStatus,
-                  streamMode: state.streamMode,
                   onRefresh: () => loadPresence(state),
                 }),
               )
@@ -1222,6 +1212,7 @@ export function renderApp(state: AppViewState) {
           state.tab === "skills"
             ? lazyRender(lazySkills, (m) =>
                 m.renderSkills({
+                  connected: state.connected,
                   loading: state.skillsLoading,
                   report: state.skillsReport,
                   error: state.skillsError,
@@ -1503,7 +1494,6 @@ export function renderApp(state: AppViewState) {
                     ))
                     ? null
                     : state.configActiveSubsection,
-                streamMode: state.streamMode,
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },
@@ -1574,7 +1564,6 @@ export function renderApp(state: AppViewState) {
                   )
                     ? null
                     : state.communicationsActiveSubsection,
-                streamMode: state.streamMode,
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },
@@ -1639,7 +1628,6 @@ export function renderApp(state: AppViewState) {
                   )
                     ? null
                     : state.appearanceActiveSubsection,
-                streamMode: state.streamMode,
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },
@@ -1704,7 +1692,6 @@ export function renderApp(state: AppViewState) {
                   )
                     ? null
                     : state.automationActiveSubsection,
-                streamMode: state.streamMode,
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },
@@ -1769,7 +1756,6 @@ export function renderApp(state: AppViewState) {
                   )
                     ? null
                     : state.infrastructureActiveSubsection,
-                streamMode: state.streamMode,
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },
@@ -1834,7 +1820,6 @@ export function renderApp(state: AppViewState) {
                   )
                     ? null
                     : state.aiAgentsActiveSubsection,
-                streamMode: state.streamMode,
                 onRawChange: (next) => {
                   state.configRaw = next;
                 },

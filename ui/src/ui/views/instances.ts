@@ -8,14 +8,13 @@ export type InstancesProps = {
   entries: PresenceEntry[];
   lastError: string | null;
   statusMessage: string | null;
-  streamMode: boolean;
   onRefresh: () => void;
 };
 
 let hostsRevealed = false;
 
 export function renderInstances(props: InstancesProps) {
-  const masked = props.streamMode || !hostsRevealed;
+  const masked = !hostsRevealed;
 
   return html`
     <section class="card">

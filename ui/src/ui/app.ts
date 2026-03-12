@@ -384,15 +384,6 @@ export class OpenClawApp extends LitElement {
   @state() paletteOpen = false;
   @state() paletteQuery = "";
   @state() paletteActiveIndex = 0;
-  @state() streamMode = (() => {
-    try {
-      const stored = localStorage.getItem("openclaw:stream-mode");
-      // Default to true (redacted) unless explicitly disabled
-      return stored === null ? true : stored === "true";
-    } catch {
-      return true;
-    }
-  })();
   @state() overviewShowGatewayToken = false;
   @state() overviewShowGatewayPassword = false;
   @state() overviewLogLines: string[] = [];

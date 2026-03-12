@@ -46,7 +46,6 @@ export type OverviewProps = {
   attentionItems: AttentionItem[];
   eventLog: EventLogEntry[];
   overviewLogLines: string[];
-  streamMode: boolean;
   showGatewayToken: boolean;
   showGatewayPassword: boolean;
   onSettingsChange: (next: UiSettings) => void;
@@ -58,7 +57,6 @@ export type OverviewProps = {
   onRefresh: () => void;
   onNavigate: (tab: string) => void;
   onRefreshLogs: () => void;
-  onToggleStreamMode: () => void;
 };
 
 export function renderOverview(props: OverviewProps) {
@@ -198,7 +196,7 @@ export function renderOverview(props: OverviewProps) {
       <div class="card">
         <div class="card-title">${t("overview.access.title")}</div>
         <div class="card-sub">${t("overview.access.subtitle")}</div>
-        <div class="ov-access-grid ${props.streamMode ? "redacted" : ""}" style="margin-top: 16px;">
+        <div class="ov-access-grid" style="margin-top: 16px;">
           <label class="field ov-access-grid__full">
             <span>${t("overview.access.wsUrl")}</span>
             <input
@@ -376,18 +374,6 @@ export function renderOverview(props: OverviewProps) {
       </div>
     </section>
 
-    ${
-      props.streamMode
-        ? html`<div class="callout ov-stream-banner" style="margin-top: 18px;">
-          <span class="nav-item__icon">${icons.radio}</span>
-          ${t("overview.streamMode.active")}
-          <button class="btn btn--sm" style="margin-left: auto;" @click=${() => props.onToggleStreamMode()}>
-            ${t("overview.streamMode.disable")}
-          </button>
-        </div>`
-        : nothing
-    }
-
     <div class="ov-section-divider"></div>
 
     ${renderOverviewCards({
@@ -397,7 +383,6 @@ export function renderOverview(props: OverviewProps) {
       cronJobs: props.cronJobs,
       cronStatus: props.cronStatus,
       presenceCount: props.presenceCount,
-      redacted: props.streamMode,
       onNavigate: props.onNavigate,
     })}
 
@@ -408,12 +393,10 @@ export function renderOverview(props: OverviewProps) {
     <div class="ov-bottom-grid" style="margin-top: 18px;">
       ${renderOverviewEventLog({
         events: props.eventLog,
-        redacted: props.streamMode,
       })}
 
       ${renderOverviewLogTail({
         lines: props.overviewLogLines,
-        redacted: props.streamMode,
         onRefreshLogs: props.onRefreshLogs,
       })}
     </div>

@@ -107,7 +107,6 @@ type SensitiveRenderParams = {
   path: Array<string | number>;
   value: unknown;
   hints: ConfigUiHints;
-  streamMode: boolean;
   revealSensitive: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
 };
@@ -128,13 +127,12 @@ function getSensitiveRenderState(params: SensitiveRenderParams): SensitiveRender
   const isSensitive = hasSensitiveConfigData(params.value, params.path, params.hints);
   const isRevealed =
     isSensitive &&
-    !params.streamMode &&
     (params.revealSensitive || (params.isSensitivePathRevealed?.(params.path) ?? false));
   return {
     isSensitive,
     isRedacted: isSensitive && !isRevealed,
     isRevealed,
-    canReveal: isSensitive && !params.streamMode,
+    canReveal: isSensitive,
   };
 }
 
@@ -402,7 +400,6 @@ export function renderNode(params: {
   disabled: boolean;
   showLabel?: boolean;
   searchCriteria?: ConfigSearchCriteria;
-  streamMode?: boolean;
   revealSensitive?: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
   onToggleSensitivePath?: (path: Array<string | number>) => void;
@@ -524,7 +521,6 @@ export function renderNode(params: {
       hints,
       disabled,
       showLabel,
-      streamMode: params.streamMode ?? false,
       revealSensitive: params.revealSensitive ?? false,
       isSensitivePathRevealed: params.isSensitivePathRevealed,
       onToggleSensitivePath: params.onToggleSensitivePath,
@@ -627,7 +623,6 @@ function renderTextInput(params: {
   disabled: boolean;
   showLabel?: boolean;
   searchCriteria?: ConfigSearchCriteria;
-  streamMode?: boolean;
   revealSensitive?: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
   onToggleSensitivePath?: (path: Array<string | number>) => void;
@@ -642,7 +637,6 @@ function renderTextInput(params: {
     path,
     value,
     hints,
-    streamMode: params.streamMode ?? false,
     revealSensitive: params.revealSensitive ?? false,
     isSensitivePathRevealed: params.isSensitivePathRevealed,
   });
@@ -819,7 +813,6 @@ function renderJsonTextarea(params: {
   hints: ConfigUiHints;
   disabled: boolean;
   showLabel?: boolean;
-  streamMode?: boolean;
   revealSensitive?: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
   onToggleSensitivePath?: (path: Array<string | number>) => void;
@@ -833,7 +826,6 @@ function renderJsonTextarea(params: {
     path,
     value,
     hints,
-    streamMode: params.streamMode ?? false,
     revealSensitive: params.revealSensitive ?? false,
     isSensitivePathRevealed: params.isSensitivePathRevealed,
   });
@@ -890,7 +882,6 @@ function renderObject(params: {
   disabled: boolean;
   showLabel?: boolean;
   searchCriteria?: ConfigSearchCriteria;
-  streamMode?: boolean;
   revealSensitive?: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
   onToggleSensitivePath?: (path: Array<string | number>) => void;
@@ -905,7 +896,6 @@ function renderObject(params: {
     disabled,
     onPatch,
     searchCriteria,
-    streamMode,
     revealSensitive,
     isSensitivePathRevealed,
     onToggleSensitivePath,
@@ -950,7 +940,6 @@ function renderObject(params: {
         unsupported,
         disabled,
         searchCriteria: childSearchCriteria,
-        streamMode,
         revealSensitive,
         isSensitivePathRevealed,
         onToggleSensitivePath,
@@ -968,7 +957,6 @@ function renderObject(params: {
             disabled,
             reservedKeys: reserved,
             searchCriteria: childSearchCriteria,
-            streamMode,
             revealSensitive,
             isSensitivePathRevealed,
             onToggleSensitivePath,
@@ -1022,7 +1010,6 @@ function renderArray(params: {
   disabled: boolean;
   showLabel?: boolean;
   searchCriteria?: ConfigSearchCriteria;
-  streamMode?: boolean;
   revealSensitive?: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
   onToggleSensitivePath?: (path: Array<string | number>) => void;
@@ -1037,7 +1024,6 @@ function renderArray(params: {
     disabled,
     onPatch,
     searchCriteria,
-    streamMode,
     revealSensitive,
     isSensitivePathRevealed,
     onToggleSensitivePath,
@@ -1121,7 +1107,6 @@ function renderArray(params: {
                   disabled,
                   searchCriteria: childSearchCriteria,
                   showLabel: false,
-                  streamMode,
                   revealSensitive,
                   isSensitivePathRevealed,
                   onToggleSensitivePath,
@@ -1147,7 +1132,6 @@ function renderMapField(params: {
   disabled: boolean;
   reservedKeys: Set<string>;
   searchCriteria?: ConfigSearchCriteria;
-  streamMode?: boolean;
   revealSensitive?: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
   onToggleSensitivePath?: (path: Array<string | number>) => void;
@@ -1163,7 +1147,6 @@ function renderMapField(params: {
     reservedKeys,
     onPatch,
     searchCriteria,
-    streamMode,
     revealSensitive,
     isSensitivePathRevealed,
     onToggleSensitivePath,
@@ -1222,7 +1205,6 @@ function renderMapField(params: {
               path: valuePath,
               value: entryValue,
               hints,
-              streamMode: streamMode ?? false,
               revealSensitive: revealSensitive ?? false,
               isSensitivePathRevealed,
             });
@@ -1313,7 +1295,6 @@ function renderMapField(params: {
                           disabled,
                           searchCriteria,
                           showLabel: false,
-                          streamMode,
                           revealSensitive,
                           isSensitivePathRevealed,
                           onToggleSensitivePath,

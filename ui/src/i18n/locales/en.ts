@@ -146,10 +146,6 @@ export const en: TranslationMap = {
       refreshAll: "Refresh All",
       terminal: "Terminal",
     },
-    streamMode: {
-      active: "Stream mode — values redacted",
-      disable: "Disable",
-    },
     palette: {
       placeholder: "Type a command…",
       noResults: "No results",

@@ -13,7 +13,6 @@ export type ConfigFormProps = {
   searchQuery?: string;
   activeSection?: string | null;
   activeSubsection?: string | null;
-  streamMode?: boolean;
   revealSensitive?: boolean;
   isSensitivePathRevealed?: (path: Array<string | number>) => boolean;
   onToggleSensitivePath?: (path: Array<string | number>) => void;
@@ -435,7 +434,6 @@ export function renderConfigForm(props: ConfigFormProps) {
                     disabled: props.disabled ?? false,
                     showLabel: false,
                     searchCriteria,
-                    streamMode: props.streamMode ?? false,
                     revealSensitive: props.revealSensitive ?? false,
                     isSensitivePathRevealed: props.isSensitivePathRevealed,
                     onToggleSensitivePath: props.onToggleSensitivePath,
@@ -474,7 +472,6 @@ export function renderConfigForm(props: ConfigFormProps) {
                     disabled: props.disabled ?? false,
                     showLabel: false,
                     searchCriteria,
-                    streamMode: props.streamMode ?? false,
                     revealSensitive: props.revealSensitive ?? false,
                     isSensitivePathRevealed: props.isSensitivePathRevealed,
                     onToggleSensitivePath: props.onToggleSensitivePath,

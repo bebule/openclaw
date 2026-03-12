@@ -3526,11 +3526,6 @@
   color: var(--text-strong);
 }
 
-.ov-card__value.redacted {
-  filter: blur(6px);
-  user-select: none;
-}
-
 .ov-card__hint {
   font-size: 12px;
   color: var(--muted);
@@ -3594,11 +3589,6 @@
   border-color: var(--border-strong);
 }
 
-.ov-recent__row.redacted {
-  filter: blur(6px);
-  user-select: none;
-}
-
 .ov-recent__key {
   font-weight: 500;
   white-space: nowrap;
@@ -3637,21 +3627,8 @@
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
 }
 
-.ov-access-grid.redacted input,
-.ov-access-grid.redacted select {
-  filter: blur(6px);
-  user-select: none;
-}
-
 .ov-access-grid__full {
   grid-column: 1 / -1;
-}
-
-/* Stream mode banner */
-.ov-stream-banner {
-  display: flex;
-  align-items: center;
-  gap: 10px;
 }
 
 /* Bottom grid (event log + log tail) */

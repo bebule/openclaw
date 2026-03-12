@@ -144,10 +144,6 @@ export const zh_TW: TranslationMap = {
       refreshAll: "全部刷新",
       terminal: "終端",
     },
-    streamMode: {
-      active: "串流模式 — 數據已隱藏",
-      disable: "禁用",
-    },
     palette: {
       placeholder: "輸入指令…",
       noResults: "無結果",

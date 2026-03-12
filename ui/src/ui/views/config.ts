@@ -6,7 +6,6 @@ import type { ConfigUiHints } from "../types.ts";
 import {
   countSensitiveConfigValues,
   humanize,
-  isSensitiveConfigPath,
   pathKey,
   REDACTED_PLACEHOLDER,
   schemaType,
@@ -34,7 +33,6 @@ export type ConfigProps = {
   searchQuery: string;
   activeSection: string | null;
   activeSubsection: string | null;
-  streamMode: boolean;
   onRawChange: (next: string) => void;
   onFormModeChange: (mode: "form" | "raw") => void;
   onFormPatch: (path: Array<string | number>, value: unknown) => void;
@@ -504,38 +502,8 @@ function truncateValue(value: unknown, maxLen = 40): string {
   return str.slice(0, maxLen - 3) + "...";
 }
 
-/**
- * Render diff value with redaction when in stream mode or path is sensitive.
- * Prevents secrets from appearing in diff panel during screen sharing.
- */
-function renderDiffValue(
-  path: string,
-  value: unknown,
-  streamMode: boolean,
-  uiHints: ConfigUiHints,
-): string {
-  const hint = uiHints[path];
-  const sensitive = hint?.sensitive ?? isSensitiveConfigPath(path);
-
-  if (streamMode && sensitive) {
-    return REDACTED_PLACEHOLDER;
-  }
-
+function renderDiffValue(path: string, value: unknown, _uiHints: ConfigUiHints): string {
   return truncateValue(value);
-}
-
-/**
- * Lightweight scan for sensitive keywords in raw config text.
- * Used when stream mode is on and formValue hasn't been parsed yet.
- */
-function containsSensitiveKeywords(raw: string): boolean {
-  // Match key patterns from SENSITIVE_PATTERNS in config-form.shared.ts
-  return (
-    /["']?\w*token["']?\s*:/i.test(raw) ||
-    /["']?\w*password["']?\s*:/i.test(raw) ||
-    /["']?\w*secret["']?\s*:/i.test(raw) ||
-    /["']?\w*api.?key["']?\s*:/i.test(raw)
-  );
 }
 
 type ThemeOption = { id: ThemeName; label: string; description: string; icon: TemplateResult };
@@ -702,12 +670,8 @@ export function renderConfig(props: ConfigProps) {
     unsupportedPaths: scopeUnsupportedPaths(rawAnalysis.unsupportedPaths, { include, exclude }),
   };
   const formUnsafe = analysis.schema ? analysis.unsupportedPaths.length > 0 : false;
-  // Force raw mode when form can't safely represent all config fields
-  const formMode = formUnsafe ? "raw" : showModeToggle ? props.formMode : "form";
-  if (formUnsafe && props.formMode === "form") {
-    props.onFormModeChange("raw");
-  }
-  const envSensitiveVisible = !props.streamMode && cvs.envRevealed;
+  const formMode = showModeToggle ? props.formMode : "form";
+  const envSensitiveVisible = cvs.envRevealed;
 
   // Build categorised nav from schema - only include sections that exist in the schema
   const schemaProps = analysis.schema?.properties ?? {};
@@ -906,7 +870,7 @@ export function renderConfig(props: ConfigProps) {
                     <div class="config-mode-toggle">
                       <button
                         class="config-mode-toggle__btn ${formMode === "form" ? "active" : ""}"
-                        ?disabled=${formUnsafe || props.schemaLoading || !props.schema}
+                        ?disabled=${props.schemaLoading || !props.schema}
                         title=${formUnsafe ? "Form view can't safely edit some fields" : ""}
                         @click=${() => props.onFormModeChange("form")}
                       >
@@ -974,11 +938,11 @@ export function renderConfig(props: ConfigProps) {
                         <div class="config-diff__path">${change.path}</div>
                         <div class="config-diff__values">
                           <span class="config-diff__from"
-                            >${renderDiffValue(change.path, change.from, props.streamMode, props.uiHints)}</span
+                            >${renderDiffValue(change.path, change.from, props.uiHints)}</span
                           >
                           <span class="config-diff__arrow">→</span>
                           <span class="config-diff__to"
-                            >${renderDiffValue(change.path, change.to, props.streamMode, props.uiHints)}</span
+                            >${renderDiffValue(change.path, change.to, props.uiHints)}</span
                           >
                         </div>
                       </div>
@@ -1013,18 +977,8 @@ export function renderConfig(props: ConfigProps) {
                     ? html`
                       <button
                         class="config-env-peek-btn ${envSensitiveVisible ? "config-env-peek-btn--active" : ""}"
-                        title=${
-                          props.streamMode
-                            ? "Disable stream mode to reveal env values"
-                            : envSensitiveVisible
-                              ? "Hide env values"
-                              : "Reveal env values"
-                        }
-                        ?disabled=${props.streamMode}
+                        title=${envSensitiveVisible ? "Hide env values" : "Reveal env values"}
                         @click=${() => {
-                          if (props.streamMode) {
-                            return;
-                          }
                           cvs.envRevealed = !cvs.envRevealed;
                           props.onRawChange(props.raw);
                         }}
@@ -1070,7 +1024,6 @@ export function renderConfig(props: ConfigProps) {
                         searchQuery: props.searchQuery,
                         activeSection: props.activeSection,
                         activeSubsection: effectiveSubsection,
-                        streamMode: props.streamMode,
                         revealSensitive:
                           props.activeSection === "env" ? envSensitiveVisible : false,
                         isSensitivePathRevealed,
@@ -1087,22 +1040,14 @@ export function renderConfig(props: ConfigProps) {
                       [],
                       props.uiHints,
                     );
-                    // In stream mode, also check raw content for sensitive keywords
-                    // to prevent newly-entered secrets from being visible before parse
-                    const rawHasSensitiveKeywords =
-                      props.streamMode && containsSensitiveKeywords(props.raw);
-                    const blurred =
-                      (sensitiveCount > 0 || rawHasSensitiveKeywords) &&
-                      (props.streamMode || !cvs.rawRevealed);
-                    const canReveal =
-                      (sensitiveCount > 0 || rawHasSensitiveKeywords) && !props.streamMode;
+                    const blurred = sensitiveCount > 0 && !cvs.rawRevealed;
                     return html`
                     ${
                       formUnsafe
                         ? html`
                             <div class="callout info" style="margin-bottom: 12px">
-                              Form view is disabled because your config contains fields the form editor can't safely represent.
-                              Edit in Raw to avoid losing entries.
+                              Your config contains fields the form editor can't safely represent. Use Raw mode to edit those
+                              entries.
                             </div>
                           `
                         : nothing
@@ -1118,19 +1063,11 @@ export function renderConfig(props: ConfigProps) {
                                 class="btn btn--icon ${blurred ? "" : "active"}"
                                 style="width:28px;height:28px;padding:0;"
                                 title=${
-                                  canReveal
-                                    ? blurred
-                                      ? "Reveal sensitive values"
-                                      : "Hide sensitive values"
-                                    : "Disable stream mode to reveal sensitive values"
+                                  blurred ? "Reveal sensitive values" : "Hide sensitive values"
                                 }
                                 aria-label="Toggle raw config redaction"
                                 aria-pressed=${!blurred}
-                                ?disabled=${!canReveal}
                                 @click=${() => {
-                                  if (!canReveal) {
-                                    return;
-                                  }
                                   cvs.rawRevealed = !cvs.rawRevealed;
                                   props.onRawChange(props.raw);
                                 }}

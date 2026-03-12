@@ -18,13 +18,8 @@ export type OverviewCardsProps = {
   cronJobs: CronJob[];
   cronStatus: CronStatus | null;
   presenceCount: number;
-  redacted: boolean;
   onNavigate: (tab: string) => void;
 };
-
-function redact(value: string, redacted: boolean) {
-  return redacted ? "••••••" : value;
-}
 
 const DIGIT_RUN = /\d{3,}/g;
 
@@ -40,14 +35,13 @@ type StatCard = {
   label: string;
   value: string | TemplateResult;
   hint: string | TemplateResult;
-  redacted?: boolean;
 };
 
 function renderStatCard(card: StatCard, onNavigate: (tab: string) => void) {
   return html`
     <button class="ov-card" data-kind=${card.kind} @click=${() => onNavigate(card.tab)}>
       <span class="ov-card__label">${card.label}</span>
-      <span class="ov-card__value ${card.redacted ? "redacted" : ""}">${card.value}</span>
+      <span class="ov-card__value">${card.value}</span>
       <span class="ov-card__hint">${card.hint}</span>
     </button>
   `;
@@ -111,9 +105,8 @@ export function renderOverviewCards(props: OverviewCardsProps) {
       kind: "cost",
       tab: "usage",
       label: t("overview.cards.cost"),
-      value: redact(totalCost, props.redacted),
-      hint: redact(`${totalTokens} tokens · ${totalMessages} msgs`, props.redacted),
-      redacted: props.redacted,
+      value: totalCost,
+      hint: `${totalTokens} tokens · ${totalMessages} msgs`,
     },
     {
       kind: "sessions",
@@ -153,8 +146,8 @@ export function renderOverviewCards(props: OverviewCardsProps) {
           <ul class="ov-recent__list">
             ${sessions.map(
               (s) => html`
-                <li class="ov-recent__row ${props.redacted ? "redacted" : ""}">
-                  <span class="ov-recent__key">${props.redacted ? redact(s.displayName || s.label || s.key, true) : blurDigits(s.displayName || s.label || s.key)}</span>
+                <li class="ov-recent__row">
+                  <span class="ov-recent__key">${blurDigits(s.displayName || s.label || s.key)}</span>
                   <span class="ov-recent__model">${s.model ?? ""}</span>
                   <span class="ov-recent__time">${s.updatedAt ? formatRelativeTimestamp(s.updatedAt) : ""}</span>
                 </li>

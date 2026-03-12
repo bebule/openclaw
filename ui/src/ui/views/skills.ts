@@ -10,6 +10,7 @@ import {
 } from "./skills-shared.ts";
 
 export type SkillsProps = {
+  connected: boolean;
   loading: boolean;
   report: SkillStatusReport | null;
   error: string | null;
@@ -42,7 +43,7 @@ export function renderSkills(props: SkillsProps) {
           <div class="card-title">Skills</div>
           <div class="card-sub">Installed skills and their status.</div>
         </div>
-        <button class="btn" ?disabled=${props.loading} @click=${props.onRefresh}>
+        <button class="btn" ?disabled=${props.loading || !props.connected} @click=${props.onRefresh}>
           ${props.loading ? "Loading…" : "Refresh"}
         </button>
       </div>
@@ -74,7 +75,13 @@ export function renderSkills(props: SkillsProps) {
       ${
         filtered.length === 0
           ? html`
-              <div class="muted" style="margin-top: 16px">No skills found.</div>
+              <div class="muted" style="margin-top: 16px">
+                ${
+                  !props.connected && !props.report
+                    ? "Not connected to gateway."
+                    : "No skills found."
+                }
+              </div>
             `
           : html`
             <div class="agent-skills-groups" style="margin-top: 16px;">

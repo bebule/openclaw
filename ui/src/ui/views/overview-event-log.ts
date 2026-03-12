@@ -6,7 +6,6 @@ import { formatEventPayload } from "../presenter.ts";
 
 export type OverviewEventLogProps = {
   events: EventLogEntry[];
-  redacted: boolean;
 };
 
 export function renderOverviewEventLog(props: OverviewEventLogProps) {
@@ -23,7 +22,7 @@ export function renderOverviewEventLog(props: OverviewEventLogProps) {
         ${t("overview.eventLog.title")}
         <span class="ov-count-badge">${props.events.length}</span>
       </summary>
-      <div class="ov-event-log-list ${props.redacted ? "redacted" : ""}">
+      <div class="ov-event-log-list">
         ${visible.map(
           (entry) => html`
             <div class="ov-event-log-entry">

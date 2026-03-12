@@ -144,10 +144,6 @@ export const zh_CN: TranslationMap = {
       refreshAll: "全部刷新",
       terminal: "终端",
     },
-    streamMode: {
-      active: "流模式 — 数据已隐藏",
-      disable: "禁用",
-    },
     palette: {
       placeholder: "输入命令…",
       noResults: "无结果",
