@@ -2,10 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 
 const hoisted = vi.hoisted(() => {
-  const resolveSessionStoreTargetsMock = vi.fn();
+  const resolveAllAgentSessionStoreTargetsMock = vi.fn();
   const loadSessionStoreMock = vi.fn();
   return {
-    resolveSessionStoreTargetsMock,
+    resolveAllAgentSessionStoreTargetsMock,
     loadSessionStoreMock,
   };
 });
@@ -16,8 +16,8 @@ vi.mock("../../config/sessions.js", async () => {
   );
   return {
     ...actual,
-    resolveSessionStoreTargets: (cfg: OpenClawConfig, opts: unknown) =>
-      hoisted.resolveSessionStoreTargetsMock(cfg, opts),
+    resolveAllAgentSessionStoreTargets: (cfg: OpenClawConfig, opts: unknown) =>
+      hoisted.resolveAllAgentSessionStoreTargetsMock(cfg, opts),
     loadSessionStore: (storePath: string) => hoisted.loadSessionStoreMock(storePath),
   };
 });
@@ -35,7 +35,7 @@ describe("listAcpSessionEntries", () => {
         store: "/custom/sessions/{agentId}.json",
       },
     } as OpenClawConfig;
-    hoisted.resolveSessionStoreTargetsMock.mockReturnValue([
+    hoisted.resolveAllAgentSessionStoreTargetsMock.mockResolvedValue([
       {
         agentId: "ops",
         storePath: "/custom/sessions/ops.json",
@@ -55,7 +55,7 @@ describe("listAcpSessionEntries", () => {
 
     const entries = await listAcpSessionEntries({ cfg });
 
-    expect(hoisted.resolveSessionStoreTargetsMock).toHaveBeenCalledWith(cfg, { allAgents: true });
+    expect(hoisted.resolveAllAgentSessionStoreTargetsMock).toHaveBeenCalledWith(cfg, undefined);
     expect(hoisted.loadSessionStoreMock).toHaveBeenCalledWith("/custom/sessions/ops.json");
     expect(entries).toEqual([
       expect.objectContaining({

@@ -1,8 +1,8 @@
 import type { OpenClawConfig } from "../../config/config.js";
 import { loadConfig } from "../../config/config.js";
 import {
+  resolveAllAgentSessionStoreTargets,
   loadSessionStore,
-  resolveSessionStoreTargets,
   resolveStorePath,
   updateSessionStore,
 } from "../../config/sessions.js";
@@ -90,9 +90,13 @@ export function readAcpSessionEntry(params: {
 
 export async function listAcpSessionEntries(params: {
   cfg?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
 }): Promise<AcpSessionStoreEntry[]> {
   const cfg = params.cfg ?? loadConfig();
-  const storeTargets = resolveSessionStoreTargets(cfg, { allAgents: true });
+  const storeTargets = await resolveAllAgentSessionStoreTargets(
+    cfg,
+    params.env ? { env: params.env } : undefined,
+  );
   const entries: AcpSessionStoreEntry[] = [];
 
   for (const target of storeTargets) {

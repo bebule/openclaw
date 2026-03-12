@@ -30,10 +30,19 @@ describe("matrix client storage paths", () => {
     }
   });
 
-  function setupStateDir(): string {
+  function setupStateDir(
+    cfg: Record<string, unknown> = {
+      channels: {
+        matrix: {},
+      },
+    },
+  ): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-matrix-storage-"));
     tempDirs.push(dir);
     setMatrixRuntime({
+      config: {
+        loadConfig: () => cfg,
+      },
       logging: {
         getChildLogger: () => ({
           info: () => {},
@@ -155,6 +164,74 @@ describe("matrix client storage paths", () => {
     expect(fs.existsSync(path.join(legacyRoot, "bot-storage.json"))).toBe(true);
     expect(fs.existsSync(storagePaths.storagePath)).toBe(false);
     expect(fs.existsSync(path.join(legacyRoot, "crypto"))).toBe(true);
+  });
+
+  it("refuses fallback migration when multiple Matrix accounts need explicit selection", async () => {
+    const stateDir = setupStateDir({
+      channels: {
+        matrix: {
+          accounts: {
+            ops: {},
+            work: {},
+          },
+        },
+      },
+    });
+    const storagePaths = resolveMatrixStoragePaths({
+      homeserver: "https://matrix.example.org",
+      userId: "@bot:example.org",
+      accessToken: "secret-token",
+      accountId: "ops",
+      env: {},
+    });
+    const legacyRoot = path.join(stateDir, "matrix");
+    fs.mkdirSync(path.join(legacyRoot, "crypto"), { recursive: true });
+    fs.writeFileSync(path.join(legacyRoot, "bot-storage.json"), '{"legacy":true}');
+
+    await expect(
+      maybeMigrateLegacyStorage({
+        storagePaths,
+        env: {},
+      }),
+    ).rejects.toThrow(/defaultAccount is not set/i);
+    expect(maybeCreateMatrixMigrationSnapshotMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(legacyRoot, "bot-storage.json"))).toBe(true);
+  });
+
+  it("refuses fallback migration for a non-selected Matrix account", async () => {
+    const stateDir = setupStateDir({
+      channels: {
+        matrix: {
+          defaultAccount: "ops",
+          homeserver: "https://matrix.default.example.org",
+          accessToken: "default-token",
+          accounts: {
+            ops: {
+              homeserver: "https://matrix.ops.example.org",
+              accessToken: "ops-token",
+            },
+          },
+        },
+      },
+    });
+    const storagePaths = resolveMatrixStoragePaths({
+      homeserver: "https://matrix.default.example.org",
+      userId: "@default:example.org",
+      accessToken: "default-token",
+      env: {},
+    });
+    const legacyRoot = path.join(stateDir, "matrix");
+    fs.mkdirSync(path.join(legacyRoot, "crypto"), { recursive: true });
+    fs.writeFileSync(path.join(legacyRoot, "bot-storage.json"), '{"legacy":true}');
+
+    await expect(
+      maybeMigrateLegacyStorage({
+        storagePaths,
+        env: {},
+      }),
+    ).rejects.toThrow(/targets account "ops"/i);
+    expect(maybeCreateMatrixMigrationSnapshotMock).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(legacyRoot, "bot-storage.json"))).toBe(true);
   });
 
   it("reuses an existing token-hash storage root after the access token changes", () => {

@@ -1,5 +1,9 @@
+import os from "node:os";
+import path from "node:path";
 import { listAgentIds, resolveDefaultAgentId } from "../../agents/agent-scope.js";
+import { resolveAgentSessionDirs } from "../../agents/session-dirs.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
+import { resolveStateDir } from "../paths.js";
 import type { OpenClawConfig } from "../types.openclaw.js";
 import { resolveStorePath } from "./paths.js";
 
@@ -22,6 +26,19 @@ function dedupeTargetsByStorePath(targets: SessionStoreTarget[]): SessionStoreTa
     }
   }
   return [...deduped.values()];
+}
+
+export async function resolveAllAgentSessionStoreTargets(
+  cfg: OpenClawConfig,
+  params: { env?: NodeJS.ProcessEnv } = {},
+): Promise<SessionStoreTarget[]> {
+  const configuredTargets = resolveSessionStoreTargets(cfg, { allAgents: true });
+  const stateDir = resolveStateDir(params.env ?? process.env, os.homedir);
+  const discoveredTargets = (await resolveAgentSessionDirs(stateDir)).map((sessionsDir) => ({
+    agentId: normalizeAgentId(path.basename(path.dirname(sessionsDir))),
+    storePath: path.join(sessionsDir, "sessions.json"),
+  }));
+  return dedupeTargetsByStorePath([...configuredTargets, ...discoveredTargets]);
 }
 
 export function resolveSessionStoreTargets(

@@ -83,11 +83,6 @@ function normalizeMatrixThreadTarget(raw: string): string | undefined {
   return normalized || undefined;
 }
 
-function normalizeMatrixDirectUserTarget(raw: string): string | undefined {
-  const normalized = normalizeMatrixThreadTarget(raw);
-  return normalized?.startsWith("@") ? normalized : undefined;
-}
-
 export function resolveMatrixAutoThreadId(params: {
   to: string;
   toolContext?: ChannelThreadingToolContext;
@@ -101,15 +96,11 @@ export function resolveMatrixAutoThreadId(params: {
   if (!target || !currentChannel) {
     return undefined;
   }
+  // Matrix user:@ targets resolve to a DM room at send time, which can differ
+  // from the current room after DM recreation or stale m.direct ordering.
+  // Only auto-thread when the explicit room target already matches.
   if (target.toLowerCase() !== currentChannel.toLowerCase()) {
-    const directTarget = normalizeMatrixDirectUserTarget(params.to);
-    const currentDirectUserId = normalizeMatrixDirectUserTarget(context.currentDirectUserId ?? "");
-    if (!directTarget || !currentDirectUserId) {
-      return undefined;
-    }
-    if (directTarget.toLowerCase() !== currentDirectUserId.toLowerCase()) {
-      return undefined;
-    }
+    return undefined;
   }
   return context.currentThreadTs;
 }
