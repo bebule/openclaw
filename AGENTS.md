@@ -75,6 +75,27 @@
 - See `docs/.i18n/README.md`.
 - The pipeline can be slow/inefficient; if it’s dragging, ping @jospalmbier on Discord instead of hacking around it.
 
+## Read First For Skills, MCP, and Group Gating
+
+- Before changing skill-dispatched tools, MCP-backed features, or WhatsApp/web group command gating, read:
+  - `docs/tools/skills.md`
+  - `docs/tools/slash-commands.md`
+  - `docs/plugins/agent-tools.md`
+  - `docs/channels/whatsapp.md`
+  - `docs/channels/group-messages.md`
+  - `docs/channels/groups.md`
+  - `docs/cli/index.md`
+  - `docs/cli/skills.md`
+  - `docs/cli/channels.md`
+  - `docs/cli/config.md`
+  - `docs/cli/agent.md`
+  - `docs/cli/acp.md`
+- Working rules from those docs:
+  - Skill slash commands already support `command-dispatch: tool`, `command-tool`, and `disable-model-invocation`; do not add a parallel command path before checking whether skill frontmatter is enough.
+  - Command-only group messages from authorized senders are expected to bypass mention gating; if that fails, fix runtime gating logic rather than adding new config knobs.
+  - Prefer plugin or extension tools for integration-specific features that need extra services or credentials; add new core tools only when the feature must ship in core or hook tightly into core session or tool context.
+  - ACP bridge does not support per-session `mcpServers`; configure MCP on the gateway, agent, or plugin side instead.
+
 ## exe.dev VM ops (general)
 
 - Access: stable path is `ssh exe.dev` then `ssh vm-name` (assume SSH key already set).
