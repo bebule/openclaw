@@ -94,6 +94,24 @@ function makeOwnerGroupConfig() {
   });
 }
 
+function makeGroupAllowlistConfig() {
+  return makeConfig({
+    agents: {
+      defaults: {
+        workspace: process.cwd(),
+      },
+    },
+    channels: {
+      whatsapp: {
+        allowFrom: ["+999"],
+        groupAllowFrom: ["+111"],
+        groupPolicy: "allowlist",
+        groups: { "*": { requireMention: true } },
+      },
+    },
+  });
+}
+
 function makeInboundCfg(messagePrefix = "") {
   return {
     agents: { defaults: { workspace: "/tmp/openclaw" } },
@@ -128,7 +146,7 @@ describe("applyGroupGating", () => {
   it.each([
     { id: "g-new", command: "/new" },
     { id: "g-status", command: "/status" },
-  ])("bypasses mention gating for owner $command in group chats", ({ id, command }) => {
+  ])("bypasses mention gating for allowlisted $command in group chats", ({ id, command }) => {
     const { result } = runGroupGating({
       cfg: makeOwnerGroupConfig(),
       msg: createGroupMessage({
@@ -136,6 +154,20 @@ describe("applyGroupGating", () => {
         body: command,
         senderE164: "+111",
         senderName: "Owner",
+      }),
+    });
+
+    expect(result.shouldProcess).toBe(true);
+  });
+
+  it("bypasses mention gating for senders allowed only via groupAllowFrom", () => {
+    const { result } = runGroupGating({
+      cfg: makeGroupAllowlistConfig(),
+      msg: createGroupMessage({
+        id: "g-group-allowlist",
+        body: "/kis_overseas TSLA",
+        senderE164: "+111",
+        senderName: "AllowedGroupUser",
       }),
     });
 
