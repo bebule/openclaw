@@ -9,11 +9,12 @@ const mocks = vi.hoisted(() => ({
   clackIsCancel: vi.fn((value: unknown) => value === Symbol.for("clack:cancel")),
   clackSelect: vi.fn(),
   clackText: vi.fn(),
+  resolveOpenClawAgentDir: vi.fn(),
   resolveDefaultAgentId: vi.fn(),
   resolveAgentDir: vi.fn(),
   resolveAgentWorkspaceDir: vi.fn(),
   resolveDefaultAgentWorkspaceDir: vi.fn(),
-  upsertAuthProfile: vi.fn(),
+  upsertAuthProfileOrThrow: vi.fn(),
   resolvePluginProviders: vi.fn(),
   createClackPrompter: vi.fn(),
   loadValidConfigOrThrow: vi.fn(),
@@ -29,7 +30,6 @@ vi.mock("../../agents/auth-profiles.js", () => ({
   loadAuthProfileStoreForRuntime: mocks.loadAuthProfileStoreForRuntime,
   listProfilesForProvider: mocks.listProfilesForProvider,
   clearAuthProfileCooldown: mocks.clearAuthProfileCooldown,
-  upsertAuthProfile: mocks.upsertAuthProfile,
 }));
 
 vi.mock("@clack/prompts", () => ({
@@ -40,6 +40,10 @@ vi.mock("@clack/prompts", () => ({
   text: mocks.clackText,
 }));
 
+vi.mock("../../agents/agent-paths.js", () => ({
+  resolveOpenClawAgentDir: mocks.resolveOpenClawAgentDir,
+}));
+
 vi.mock("../../agents/agent-scope.js", () => ({
   resolveDefaultAgentId: mocks.resolveDefaultAgentId,
   resolveAgentDir: mocks.resolveAgentDir,
@@ -48,6 +52,10 @@ vi.mock("../../agents/agent-scope.js", () => ({
 
 vi.mock("../../agents/workspace.js", () => ({
   resolveDefaultAgentWorkspaceDir: mocks.resolveDefaultAgentWorkspaceDir,
+}));
+
+vi.mock("../auth-profile-write.js", () => ({
+  upsertAuthProfileOrThrow: mocks.upsertAuthProfileOrThrow,
 }));
 
 vi.mock("../../plugins/providers.runtime.js", () => ({
@@ -141,7 +149,8 @@ describe("modelsAuthLoginCommand", () => {
     );
     mocks.clackSelect.mockReset();
     mocks.clackText.mockReset();
-    mocks.upsertAuthProfile.mockReset();
+    mocks.resolveOpenClawAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
+    mocks.upsertAuthProfileOrThrow.mockReset();
 
     mocks.resolveDefaultAgentId.mockReturnValue("main");
     mocks.resolveAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
@@ -198,7 +207,7 @@ describe("modelsAuthLoginCommand", () => {
     await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
 
     expect(runProviderAuth).toHaveBeenCalledOnce();
-    expect(mocks.upsertAuthProfile).toHaveBeenCalledWith({
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
       profileId: "openai-codex:user@example.com",
       credential: expect.objectContaining({
         type: "oauth",
@@ -265,7 +274,7 @@ describe("modelsAuthLoginCommand", () => {
     );
 
     expect(runClaudeCliMigration).toHaveBeenCalledOnce();
-    expect(mocks.upsertAuthProfile).not.toHaveBeenCalled();
+    expect(mocks.upsertAuthProfileOrThrow).not.toHaveBeenCalled();
     expect(lastUpdatedConfig?.agents?.defaults?.model).toEqual({
       primary: "claude-cli/claude-sonnet-4-6",
     });
@@ -302,7 +311,6 @@ describe("modelsAuthLoginCommand", () => {
       profileId: "openai-codex:user@example.com",
       agentDir: "/tmp/openclaw/agents/main",
     });
-    // Verify clearing happens before login attempt
     const clearOrder = mocks.clearAuthProfileCooldown.mock.invocationCallOrder[0];
     const loginOrder = runProviderAuth.mock.invocationCallOrder[0];
     expect(clearOrder).toBeLessThan(loginOrder);
@@ -353,7 +361,7 @@ describe("modelsAuthLoginCommand", () => {
         "exit:0",
       );
 
-      expect(mocks.upsertAuthProfile).not.toHaveBeenCalled();
+      expect(mocks.upsertAuthProfileOrThrow).not.toHaveBeenCalled();
       expect(mocks.updateConfig).not.toHaveBeenCalled();
       expect(mocks.logConfigUpdated).not.toHaveBeenCalled();
     } finally {
@@ -367,7 +375,7 @@ describe("modelsAuthLoginCommand", () => {
 
     await modelsAuthPasteTokenCommand({ provider: "openai" }, runtime);
 
-    expect(mocks.upsertAuthProfile).toHaveBeenCalledWith({
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
       profileId: "openai:manual",
       credential: {
         type: "token",
@@ -410,7 +418,7 @@ describe("modelsAuthLoginCommand", () => {
     await modelsAuthSetupTokenCommand({ provider: "moonshot", yes: true }, runtime);
 
     expect(runTokenAuth).toHaveBeenCalledOnce();
-    expect(mocks.upsertAuthProfile).toHaveBeenCalledWith({
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
       profileId: "moonshot:token",
       credential: {
         type: "token",
