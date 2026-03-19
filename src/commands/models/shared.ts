@@ -10,13 +10,16 @@ import {
 import { formatCliCommand } from "../../cli/command-format.js";
 import {
   type OpenClawConfig,
+  readConfigFileSnapshotForWrite,
   readConfigFileSnapshot,
+  resolveConfigPath,
   writeConfigFile,
 } from "../../config/config.js";
 import { formatConfigIssueLines } from "../../config/issue-format.js";
 import { toAgentModelListLike } from "../../config/model-input.js";
 import type { AgentModelEntryConfig } from "../../config/types.agent-defaults.js";
 import type { AgentModelConfig } from "../../config/types.agents-shared.js";
+import { withFileLock } from "../../infra/file-lock.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 
 export const ensureFlagCompatibility = (opts: { json?: boolean; plain?: boolean }) => {
@@ -64,6 +67,17 @@ export const isLocalBaseUrl = (baseUrl: string) => {
   }
 };
 
+const CONFIG_UPDATE_LOCK_OPTIONS = {
+  retries: {
+    retries: 10,
+    factor: 2,
+    minTimeout: 100,
+    maxTimeout: 10_000,
+    randomize: true,
+  },
+  stale: 30_000,
+} as const;
+
 export async function loadValidConfigOrThrow(): Promise<OpenClawConfig> {
   const snapshot = await readConfigFileSnapshot();
   if (!snapshot.valid) {
@@ -76,10 +90,17 @@ export async function loadValidConfigOrThrow(): Promise<OpenClawConfig> {
 export async function updateConfig(
   mutator: (cfg: OpenClawConfig) => OpenClawConfig,
 ): Promise<OpenClawConfig> {
-  const config = await loadValidConfigOrThrow();
-  const next = mutator(config);
-  await writeConfigFile(next);
-  return next;
+  const configPath = resolveConfigPath();
+  return await withFileLock(configPath, CONFIG_UPDATE_LOCK_OPTIONS, async () => {
+    const { snapshot, writeOptions } = await readConfigFileSnapshotForWrite();
+    if (!snapshot.valid) {
+      const issues = formatConfigIssueLines(snapshot.issues, "-").join("\n");
+      throw new Error(`Invalid config at ${snapshot.path}\n${issues}`);
+    }
+    const next = mutator(snapshot.config);
+    await writeConfigFile(next, writeOptions);
+    return next;
+  });
 }
 
 export function resolveModelTarget(params: { raw: string; cfg: OpenClawConfig }): {

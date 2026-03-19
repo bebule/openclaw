@@ -5,12 +5,12 @@ import {
   select as clackSelect,
   text as clackText,
 } from "@clack/prompts";
+import { resolveOpenClawAgentDir } from "../../agents/agent-paths.js";
 import {
   resolveAgentDir,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
 } from "../../agents/agent-scope.js";
-import { upsertAuthProfile } from "../../agents/auth-profiles.js";
 import type { AuthProfileCredential } from "../../agents/auth-profiles/types.js";
 import { normalizeProviderId } from "../../agents/model-selection.js";
 import { resolveDefaultAgentWorkspaceDir } from "../../agents/workspace.js";
@@ -22,6 +22,7 @@ import type { ProviderAuthResult, ProviderPlugin } from "../../plugins/types.js"
 import type { RuntimeEnv } from "../../runtime.js";
 import { stylePromptHint, stylePromptMessage } from "../../terminal/prompt-style.js";
 import { createClackPrompter } from "../../wizard/clack-prompter.js";
+import { upsertAuthProfileOrThrow } from "../auth-profile-write.js";
 import { validateAnthropicSetupToken } from "../auth-token.js";
 import { isRemoteEnvironment } from "../oauth-env.js";
 import { createVpsAwareOAuthHandlers } from "../oauth-flow.js";
@@ -38,7 +39,7 @@ import {
   pickAuthMethod,
   resolveProviderMatch,
 } from "../provider-auth-helpers.js";
-import { loadValidConfigOrThrow, updateConfig } from "./shared.js";
+import { loadValidConfigOrThrow, resolveKnownAgentId, updateConfig } from "./shared.js";
 
 function guardCancel<T>(value: T | symbol): T {
   if (typeof value === "symbol" || isCancel(value)) {
@@ -91,14 +92,43 @@ function resolveDefaultTokenProfileId(provider: string): string {
   return `${normalizeProviderId(provider)}:manual`;
 }
 
+function resolveAuthTargetContext(params: {
+  cfg: Awaited<ReturnType<typeof loadValidConfigOrThrow>>;
+  rawAgentId?: string;
+}) {
+  const defaultAgentId = resolveDefaultAgentId(params.cfg);
+  const agentId =
+    resolveKnownAgentId({
+      cfg: params.cfg,
+      rawAgentId: params.rawAgentId,
+    }) ?? defaultAgentId;
+  const hasEnvAgentOverride =
+    Boolean(process.env.OPENCLAW_AGENT_DIR?.trim()) ||
+    Boolean(process.env.PI_CODING_AGENT_DIR?.trim());
+  // Respect explicit agent-dir env overrides for the default agent so host-side
+  // auth helpers can target the bind-mounted state used by Docker.
+  const agentDir =
+    hasEnvAgentOverride && agentId === defaultAgentId
+      ? resolveOpenClawAgentDir()
+      : resolveAgentDir(params.cfg, agentId);
+  const workspaceDir =
+    resolveAgentWorkspaceDir(params.cfg, agentId) ?? resolveDefaultAgentWorkspaceDir();
+  return { agentId, agentDir, workspaceDir };
+}
+
 export async function modelsAuthSetupTokenCommand(
-  opts: { provider?: string; yes?: boolean },
+  opts: { provider?: string; yes?: boolean; agent?: string },
   runtime: RuntimeEnv,
 ) {
   const provider = resolveTokenProvider(opts.provider ?? "anthropic");
   if (provider !== "anthropic") {
     throw new Error("Only --provider anthropic is supported for setup-token.");
   }
+  const config = await loadValidConfigOrThrow();
+  const { agentDir } = resolveAuthTargetContext({
+    cfg: config,
+    rawAgentId: opts.agent,
+  });
 
   if (!process.stdin.isTTY) {
     throw new Error("setup-token requires an interactive TTY.");
@@ -121,8 +151,9 @@ export async function modelsAuthSetupTokenCommand(
   const token = String(tokenInput ?? "").trim();
   const profileId = resolveDefaultTokenProfileId(provider);
 
-  upsertAuthProfile({
+  await upsertAuthProfileOrThrow({
     profileId,
+    agentDir,
     credential: {
       type: "token",
       provider,
@@ -147,6 +178,7 @@ export async function modelsAuthPasteTokenCommand(
     provider?: string;
     profileId?: string;
     expiresIn?: string;
+    agent?: string;
   },
   runtime: RuntimeEnv,
 ) {
@@ -154,6 +186,11 @@ export async function modelsAuthPasteTokenCommand(
   if (!rawProvider) {
     throw new Error("Missing --provider.");
   }
+  const config = await loadValidConfigOrThrow();
+  const { agentDir } = resolveAuthTargetContext({
+    cfg: config,
+    rawAgentId: opts.agent,
+  });
   const provider = normalizeProviderId(rawProvider);
   const profileId = opts.profileId?.trim() || resolveDefaultTokenProfileId(provider);
 
@@ -168,8 +205,9 @@ export async function modelsAuthPasteTokenCommand(
       ? Date.now() + parseDurationMs(String(opts.expiresIn ?? "").trim(), { defaultUnit: "d" })
       : undefined;
 
-  upsertAuthProfile({
+  await upsertAuthProfileOrThrow({
     profileId,
+    agentDir,
     credential: {
       type: "token",
       provider,
@@ -184,7 +222,7 @@ export async function modelsAuthPasteTokenCommand(
   runtime.log(`Auth profile: ${profileId} (${provider}/token)`);
 }
 
-export async function modelsAuthAddCommand(_opts: Record<string, never>, runtime: RuntimeEnv) {
+export async function modelsAuthAddCommand(opts: { agent?: string }, runtime: RuntimeEnv) {
   const provider = await select({
     message: "Token provider",
     options: [
@@ -222,7 +260,7 @@ export async function modelsAuthAddCommand(_opts: Record<string, never>, runtime
   })) as "setup-token" | "paste";
 
   if (method === "setup-token") {
-    await modelsAuthSetupTokenCommand({ provider: providerId }, runtime);
+    await modelsAuthSetupTokenCommand({ provider: providerId, agent: opts.agent }, runtime);
     return;
   }
 
@@ -256,13 +294,17 @@ export async function modelsAuthAddCommand(_opts: Record<string, never>, runtime
       ).trim()
     : undefined;
 
-  await modelsAuthPasteTokenCommand({ provider: providerId, profileId, expiresIn }, runtime);
+  await modelsAuthPasteTokenCommand(
+    { provider: providerId, profileId, expiresIn, agent: opts.agent },
+    runtime,
+  );
 }
 
 type LoginOptions = {
   provider?: string;
   method?: string;
   setDefault?: boolean;
+  agent?: string;
 };
 
 export function resolveRequestedLoginProviderOrThrow(
@@ -348,10 +390,10 @@ export async function modelsAuthLoginCommand(opts: LoginOptions, runtime: Runtim
   }
 
   const config = await loadValidConfigOrThrow();
-  const defaultAgentId = resolveDefaultAgentId(config);
-  const agentDir = resolveAgentDir(config, defaultAgentId);
-  const workspaceDir =
-    resolveAgentWorkspaceDir(config, defaultAgentId) ?? resolveDefaultAgentWorkspaceDir();
+  const { agentDir, workspaceDir } = resolveAuthTargetContext({
+    cfg: config,
+    rawAgentId: opts.agent,
+  });
   const requestedProviderId = normalizeProviderId(String(opts.provider ?? ""));
   const prompter = createClackPrompter();
 
@@ -426,7 +468,7 @@ export async function modelsAuthLoginCommand(opts: LoginOptions, runtime: Runtim
   });
 
   for (const profile of result.profiles) {
-    upsertAuthProfile({
+    await upsertAuthProfileOrThrow({
       profileId: profile.profileId,
       credential: profile.credential,
       agentDir,
