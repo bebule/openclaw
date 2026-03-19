@@ -127,6 +127,22 @@ If your automation exports no Claude session vars, leaving them unset now resolv
 empty values by default in `docker-compose.yml` to avoid repeated "variable is not set"
 warnings.
 
+### Host-side model auth for Docker state
+
+Because Docker Compose bind-mounts `OPENCLAW_CONFIG_DIR` into the container, you can run
+interactive model auth on the host and still update the same `openclaw.json` and
+`auth-profiles.json` files that the container uses.
+
+Use the helper script from the repo root:
+
+```bash
+OPENCLAW_CONFIG_DIR=~/.openclaw \
+  scripts/docker-host-model-auth.sh login --provider openai-codex --set-default
+```
+
+The script points host-side CLI commands at the bind-mounted state directory and targets the
+default `main` agent unless you override `OPENCLAW_DOCKER_AUTH_AGENT_ID`.
+
 ### Shared-network security note (CLI + gateway)
 
 `openclaw-cli` uses `network_mode: "service:openclaw-gateway"` so CLI commands can
