@@ -30,8 +30,10 @@ import type {
   ProviderAuthResult,
   ProviderPlugin,
 } from "../../plugins/types.js";
+import { normalizeAgentId } from "../../routing/session-key.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { stylePromptHint, stylePromptMessage } from "../../terminal/prompt-style.js";
+import { resolveUserPath } from "../../utils.js";
 import { createClackPrompter } from "../../wizard/clack-prompter.js";
 import { upsertAuthProfileOrThrow } from "../auth-profile-write.js";
 import { isRemoteEnvironment } from "../oauth-env.js";
@@ -101,6 +103,17 @@ function listProvidersWithTokenMethods(providers: ProviderPlugin[]): ProviderPlu
   return providers.filter((provider) => listTokenAuthMethods(provider).length > 0);
 }
 
+function resolveDockerHelperTargetAgentId(): string | undefined {
+  const raw = process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID?.trim();
+  return raw ? normalizeAgentId(raw) : undefined;
+}
+
+function resolveHostAuthWorkspaceOverride(): string | undefined {
+  const raw =
+    process.env.OPENCLAW_WORKSPACE_DIR?.trim() || process.env.CLAWDBOT_WORKSPACE_DIR?.trim();
+  return raw ? resolveUserPath(raw) : undefined;
+}
+
 function resolveAuthTargetContext(params: {
   cfg: Awaited<ReturnType<typeof loadValidConfigOrThrow>>;
   rawAgentId?: string;
@@ -111,15 +124,22 @@ function resolveAuthTargetContext(params: {
       cfg: params.cfg,
       rawAgentId: params.rawAgentId,
     }) ?? defaultAgentId;
+  const dockerHelperAgentId = resolveDockerHelperTargetAgentId();
+  const useDockerHelperOverrides = dockerHelperAgentId === agentId;
   const hasEnvAgentOverride =
     Boolean(process.env.OPENCLAW_AGENT_DIR?.trim()) ||
     Boolean(process.env.PI_CODING_AGENT_DIR?.trim());
   const agentDir =
-    hasEnvAgentOverride && agentId === defaultAgentId
+    useDockerHelperOverrides || (hasEnvAgentOverride && agentId === defaultAgentId)
       ? resolveOpenClawAgentDir()
       : resolveAgentDir(params.cfg, agentId);
+  const workspaceOverride = useDockerHelperOverrides
+    ? resolveHostAuthWorkspaceOverride()
+    : undefined;
   const workspaceDir =
-    resolveAgentWorkspaceDir(params.cfg, agentId) ?? resolveDefaultAgentWorkspaceDir();
+    workspaceOverride ??
+    resolveAgentWorkspaceDir(params.cfg, agentId) ??
+    resolveDefaultAgentWorkspaceDir();
   return { agentId, agentDir, workspaceDir };
 }
 

@@ -17,6 +17,7 @@ Subcommands:
 
 Environment:
   OPENCLAW_CONFIG_DIR             Host path mounted into the Docker container as /home/node/.openclaw
+  OPENCLAW_WORKSPACE_DIR          Optional host workspace path mounted into /home/node/.openclaw/workspace
   OPENCLAW_DOCKER_AUTH_AGENT_ID   Agent id to target (default: main)
 EOF
   exit 2
@@ -45,6 +46,8 @@ agent_dir="${state_dir}/agents/${agent_id}/agent"
 
 export OPENCLAW_STATE_DIR="${state_dir}"
 export OPENCLAW_CONFIG_PATH="${OPENCLAW_CONFIG_PATH:-${state_dir}/openclaw.json}"
+export OPENCLAW_DOCKER_AUTH_AGENT_ID="${agent_id}"
+export OPENCLAW_WORKSPACE_DIR="${OPENCLAW_WORKSPACE_DIR:-${state_dir}/workspace}"
 export OPENCLAW_AGENT_DIR="${OPENCLAW_AGENT_DIR:-${agent_dir}}"
 export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-${OPENCLAW_AGENT_DIR}}"
 
