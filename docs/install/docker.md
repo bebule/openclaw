@@ -123,6 +123,22 @@ and setup-time config writes through `openclaw-gateway` with
 `--no-deps --entrypoint node`.
 </Note>
 
+### Host-side model auth for Docker state
+
+Because Docker Compose bind-mounts `OPENCLAW_CONFIG_DIR` into the container, you can run
+interactive model auth on the host and still update the same `openclaw.json` and
+`auth-profiles.json` files that the container uses.
+
+Use the helper script from the repo root:
+
+```bash
+OPENCLAW_CONFIG_DIR=~/.openclaw \
+  scripts/docker-host-model-auth.sh login --provider openai-codex --set-default
+```
+
+The script points host-side CLI commands at the bind-mounted state directory and targets the
+default `main` agent unless you override `OPENCLAW_DOCKER_AUTH_AGENT_ID`.
+
 ### Environment variables
 
 The setup script accepts these optional environment variables:
