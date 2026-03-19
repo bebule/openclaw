@@ -143,6 +143,16 @@ OPENCLAW_CONFIG_DIR=~/.openclaw \
 The script points host-side CLI commands at the bind-mounted state directory and targets the
 default `main` agent unless you override `OPENCLAW_DOCKER_AUTH_AGENT_ID`.
 
+For plugin-based auth flows, also set `OPENCLAW_WORKSPACE_DIR` to the same host workspace path
+that Docker Compose mounts into `/home/node/.openclaw/workspace`, so provider discovery matches
+the container:
+
+```bash
+OPENCLAW_CONFIG_DIR=~/.openclaw \
+OPENCLAW_WORKSPACE_DIR=~/openclaw-workspace \
+  scripts/docker-host-model-auth.sh login --provider your-plugin-provider
+```
+
 ### Shared-network security note (CLI + gateway)
 
 `openclaw-cli` uses `network_mode: "service:openclaw-gateway"` so CLI commands can

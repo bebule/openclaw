@@ -20,7 +20,7 @@ vi.mock("../../config/config.js", () => ({
 }));
 
 vi.mock("../../infra/file-lock.js", () => ({
-  withFileLock: (...args: unknown[]) => mocks.withFileLock(...args),
+  withFileLock: mocks.withFileLock,
 }));
 
 import { loadValidConfigOrThrow, updateConfig } from "./shared.js";

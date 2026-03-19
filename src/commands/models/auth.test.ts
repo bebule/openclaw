@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   clackIsCancel: vi.fn((value: unknown) => value === Symbol.for("clack:cancel")),
   clackSelect: vi.fn(),
   clackText: vi.fn(),
+  resolveOpenClawAgentDir: vi.fn(),
+  listAgentIds: vi.fn(),
   resolveDefaultAgentId: vi.fn(),
   resolveAgentDir: vi.fn(),
   resolveAgentWorkspaceDir: vi.fn(),
@@ -31,7 +33,12 @@ vi.mock("@clack/prompts", () => ({
   text: mocks.clackText,
 }));
 
+vi.mock("../../agents/agent-paths.js", () => ({
+  resolveOpenClawAgentDir: mocks.resolveOpenClawAgentDir,
+}));
+
 vi.mock("../../agents/agent-scope.js", () => ({
+  listAgentIds: mocks.listAgentIds,
   resolveDefaultAgentId: mocks.resolveDefaultAgentId,
   resolveAgentDir: mocks.resolveAgentDir,
   resolveAgentWorkspaceDir: mocks.resolveAgentWorkspaceDir,
@@ -127,9 +134,13 @@ describe("modelsAuthLoginCommand", () => {
     );
     mocks.clackSelect.mockReset();
     mocks.clackText.mockReset();
+    mocks.resolveOpenClawAgentDir.mockReset();
+    mocks.listAgentIds.mockReset();
     mocks.upsertAuthProfileOrThrow.mockReset();
 
+    mocks.listAgentIds.mockReturnValue(["main", "ops"]);
     mocks.resolveDefaultAgentId.mockReturnValue("main");
+    mocks.resolveOpenClawAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
     mocks.resolveAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
     mocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/openclaw/workspace");
     mocks.resolveDefaultAgentWorkspaceDir.mockReturnValue("/tmp/openclaw/workspace");
@@ -228,5 +239,69 @@ describe("modelsAuthLoginCommand", () => {
     } finally {
       exitSpy.mockRestore();
     }
+  });
+
+  it("uses docker helper overrides for a non-default agent target", async () => {
+    const runtime = createRuntime();
+    const note = vi.fn(async () => {});
+    const select = vi.fn().mockResolvedValue("oauth");
+    const providerRun = vi.fn().mockResolvedValue({
+      profiles: [
+        {
+          profileId: "example:user@example.com",
+          credential: {
+            type: "oauth",
+            provider: "example",
+            email: "user@example.com",
+            access: "token",
+          },
+        },
+      ],
+      defaultModel: "example/model",
+    });
+    mocks.resolveDefaultAgentId.mockReturnValue("main");
+    mocks.resolveOpenClawAgentDir.mockReturnValue("/docker/agents/ops/agent");
+    mocks.resolveAgentDir.mockImplementation(
+      (_cfg: OpenClawConfig, agentId: string) => `/config/agents/${agentId}`,
+    );
+    mocks.resolveAgentWorkspaceDir.mockReturnValue("/config/workspaces/ops");
+    mocks.createClackPrompter.mockReturnValue({ note, select });
+    mocks.resolvePluginProviders.mockReturnValue([
+      {
+        id: "example",
+        label: "Example",
+        auth: [{ id: "oauth", label: "OAuth", run: providerRun }],
+      },
+    ]);
+
+    const previous = {
+      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
+      OPENCLAW_WORKSPACE_DIR: process.env.OPENCLAW_WORKSPACE_DIR,
+    };
+    process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = "ops";
+    process.env.OPENCLAW_WORKSPACE_DIR = "/docker/workspace";
+    try {
+      await modelsAuthLoginCommand({ provider: "example", agent: "ops" }, runtime);
+    } finally {
+      process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = previous.OPENCLAW_DOCKER_AUTH_AGENT_ID;
+      process.env.OPENCLAW_WORKSPACE_DIR = previous.OPENCLAW_WORKSPACE_DIR;
+    }
+
+    expect(mocks.resolvePluginProviders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceDir: "/docker/workspace",
+      }),
+    );
+    expect(providerRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/docker/agents/ops/agent",
+        workspaceDir: "/docker/workspace",
+      }),
+    );
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/docker/agents/ops/agent",
+      }),
+    );
   });
 });
