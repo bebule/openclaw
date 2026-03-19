@@ -4,7 +4,6 @@ import {
   resolveAgentDir,
   resolveAgentWorkspaceDir,
 } from "../agents/agent-scope.js";
-import { upsertAuthProfile } from "../agents/auth-profiles.js";
 import { resolveDefaultAgentWorkspaceDir } from "../agents/workspace.js";
 import { enablePluginInConfig } from "../plugins/enable.js";
 import {
@@ -14,6 +13,7 @@ import {
 import { resolvePluginProviders } from "../plugins/providers.js";
 import type { ProviderAuthMethod } from "../plugins/types.js";
 import type { ApplyAuthChoiceParams, ApplyAuthChoiceResult } from "./auth-choice.apply.js";
+import { upsertAuthProfileOrThrow } from "./auth-profile-write.js";
 import { isRemoteEnvironment } from "./oauth-env.js";
 import { createVpsAwareOAuthHandlers } from "./oauth-flow.js";
 import { applyAuthProfileConfig } from "./onboard-auth.js";
@@ -77,7 +77,7 @@ export async function runProviderPluginAuthMethod(params: {
   }
 
   for (const profile of result.profiles) {
-    upsertAuthProfile({
+    await upsertAuthProfileOrThrow({
       profileId: profile.profileId,
       credential: profile.credential,
       agentDir,

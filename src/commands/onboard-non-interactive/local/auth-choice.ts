@@ -1,4 +1,3 @@
-import { upsertAuthProfile } from "../../../agents/auth-profiles.js";
 import type { ApiKeyCredential } from "../../../agents/auth-profiles/types.js";
 import { normalizeProviderId } from "../../../agents/model-selection.js";
 import { parseDurationMs } from "../../../cli/parse-duration.js";
@@ -8,6 +7,7 @@ import type { RuntimeEnv } from "../../../runtime.js";
 import { resolveDefaultSecretProviderAlias } from "../../../secrets/ref-contract.js";
 import { normalizeSecretInput } from "../../../utils/normalize-secret-input.js";
 import { normalizeSecretInputModeInput } from "../../auth-choice.apply-helpers.js";
+import { upsertAuthProfileOrThrow } from "../../auth-profile-write.js";
 import { buildTokenProfileId, validateAnthropicSetupToken } from "../../auth-token.js";
 import {
   applyAuthProfileConfig,
@@ -218,7 +218,7 @@ export async function applyNonInteractiveAuthChoice(params: {
     }
 
     const profileId = opts.tokenProfileId?.trim() || buildTokenProfileId({ provider, name: "" });
-    upsertAuthProfile({
+    await upsertAuthProfileOrThrow({
       profileId,
       credential: {
         type: "token",

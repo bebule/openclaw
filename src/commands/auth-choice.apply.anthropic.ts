@@ -1,4 +1,3 @@
-import { upsertAuthProfile } from "../agents/auth-profiles.js";
 import { normalizeApiKeyInput, validateApiKeyInput } from "./auth-choice.api-key.js";
 import {
   normalizeSecretInputModeInput,
@@ -7,6 +6,7 @@ import {
   resolveSecretInputModeForEnvSelection,
 } from "./auth-choice.apply-helpers.js";
 import type { ApplyAuthChoiceParams, ApplyAuthChoiceResult } from "./auth-choice.apply.js";
+import { upsertAuthProfileOrThrow } from "./auth-profile-write.js";
 import { buildTokenProfileId, validateAnthropicSetupToken } from "./auth-token.js";
 import { applyAgentDefaultModelPrimary } from "./onboard-auth.config-shared.js";
 import { applyAuthProfileConfig, setAnthropicApiKey } from "./onboard-auth.js";
@@ -76,7 +76,7 @@ export async function applyAuthChoiceAnthropic(
       name: String(profileNameRaw ?? ""),
     });
 
-    upsertAuthProfile({
+    await upsertAuthProfileOrThrow({
       profileId: namedProfileId,
       agentDir: params.agentDir,
       credential: {
