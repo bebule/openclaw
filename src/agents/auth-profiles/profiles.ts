@@ -57,10 +57,12 @@ export async function upsertAuthProfileWithLock(params: {
   profileId: string;
   credential: AuthProfileCredential;
   agentDir?: string;
+  throwOnError?: boolean;
 }): Promise<AuthProfileStore | null> {
   const credential = sanitizeAuthProfileCredential(params.credential);
   return await updateAuthProfileStoreWithLock({
     agentDir: params.agentDir,
+    throwOnError: params.throwOnError,
     updater: (store) => {
       store.profiles[params.profileId] = credential;
       return true;

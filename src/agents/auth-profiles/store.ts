@@ -80,6 +80,7 @@ export function clearRuntimeAuthProfileStoreSnapshots(): void {
 export async function updateAuthProfileStoreWithLock(params: {
   agentDir?: string;
   updater: (store: AuthProfileStore) => boolean;
+  throwOnError?: boolean;
 }): Promise<AuthProfileStore | null> {
   const authPath = resolveAuthStorePath(params.agentDir);
   ensureAuthStoreFile(authPath);
@@ -93,7 +94,10 @@ export async function updateAuthProfileStoreWithLock(params: {
       }
       return store;
     });
-  } catch {
+  } catch (error) {
+    if (params.throwOnError) {
+      throw error;
+    }
     return null;
   }
 }
