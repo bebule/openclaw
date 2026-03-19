@@ -1,5 +1,5 @@
 import { resolveOpenClawAgentDir } from "../agents/agent-paths.js";
-import { upsertAuthProfile } from "../agents/auth-profiles.js";
+import { upsertAuthProfileOrThrow } from "../commands/auth-profile-write.js";
 import type { SecretInput } from "../config/types.secrets.js";
 import {
   buildApiKeyCredential,
@@ -16,7 +16,7 @@ type ProviderApiKeySetter = (
   options?: ApiKeyStorageOptions,
 ) => Promise<void> | void;
 
-function upsertProviderApiKeyProfile(params: {
+async function upsertProviderApiKeyProfile(params: {
   provider: string;
   key: SecretInput;
   agentDir?: string;
@@ -24,7 +24,7 @@ function upsertProviderApiKeyProfile(params: {
   profileId?: string;
   metadata?: Record<string, string>;
 }) {
-  upsertAuthProfile({
+  await upsertAuthProfileOrThrow({
     profileId: params.profileId ?? `${params.provider}:default`,
     credential: buildApiKeyCredential(params.provider, params.key, params.metadata, params.options),
     agentDir: resolveAuthAgentDir(params.agentDir),
@@ -36,7 +36,7 @@ function createProviderApiKeySetter(
   resolveKey: (key: SecretInput) => SecretInput = (key) => key,
 ): ProviderApiKeySetter {
   return async (key, agentDir, options) => {
-    upsertProviderApiKeyProfile({
+    await upsertProviderApiKeyProfile({
       provider,
       key: resolveKey(key),
       agentDir,
@@ -147,7 +147,7 @@ export async function setMinimaxApiKey(
   options?: ApiKeyStorageOptions,
 ) {
   const provider = profileId.split(":")[0] ?? "minimax";
-  upsertProviderApiKeyProfile({ provider, key, agentDir, options, profileId });
+  await upsertProviderApiKeyProfile({ provider, key, agentDir, options, profileId });
 }
 
 export async function setCloudflareAiGatewayConfig(
@@ -159,7 +159,7 @@ export async function setCloudflareAiGatewayConfig(
 ) {
   const normalizedAccountId = accountId.trim();
   const normalizedGatewayId = gatewayId.trim();
-  upsertProviderApiKeyProfile({
+  await upsertProviderApiKeyProfile({
     provider: "cloudflare-ai-gateway",
     key: apiKey,
     agentDir,
@@ -193,6 +193,6 @@ async function setSharedOpencodeApiKey(
   options?: ApiKeyStorageOptions,
 ) {
   for (const provider of ["opencode", "opencode-go"] as const) {
-    upsertProviderApiKeyProfile({ provider, key, agentDir, options });
+    await upsertProviderApiKeyProfile({ provider, key, agentDir, options });
   }
 }
