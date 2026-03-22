@@ -375,13 +375,16 @@ export function registerModelsCli(program: Command) {
     .command("login-github-copilot")
     .description("Login to GitHub Copilot via GitHub device flow (TTY required)")
     .option("--yes", "Overwrite existing profile without prompting", false)
-    .action(async (opts) => {
+    .action(async (opts, command) => {
+      const agent =
+        resolveOptionFromCommand<string>(command, "agent") ?? (opts.agent as string | undefined);
       await runModelsCommand(async () => {
         await modelsAuthLoginCommand(
           {
             provider: "github-copilot",
             method: "device",
             yes: Boolean(opts.yes),
+            agent,
           },
           defaultRuntime,
         );

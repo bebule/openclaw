@@ -61,13 +61,16 @@ async function runGitHubCopilotAuth(ctx: ProviderAuthContext) {
   }
 
   try {
-    await githubCopilotLoginCommand({ yes: true, profileId: "github-copilot:github" }, ctx.runtime);
+    await githubCopilotLoginCommand(
+      { yes: true, profileId: "github-copilot:github", agentDir: ctx.agentDir },
+      ctx.runtime,
+    );
   } catch (err) {
     await ctx.prompter.note(`GitHub Copilot login failed: ${String(err)}`, "GitHub Copilot");
     return { profiles: [] };
   }
 
-  const authStore = ensureAuthProfileStore(undefined, {
+  const authStore = ensureAuthProfileStore(ctx.agentDir, {
     allowKeychainPrompt: false,
   });
   const credential = authStore.profiles["github-copilot:github"];

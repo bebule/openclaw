@@ -119,20 +119,16 @@ function resolveAuthTargetContext(params: {
   rawAgentId?: string;
 }) {
   const defaultAgentId = resolveDefaultAgentId(params.cfg);
-  const agentId =
-    resolveKnownAgentId({
-      cfg: params.cfg,
-      rawAgentId: params.rawAgentId,
-    }) ?? defaultAgentId;
+  const explicitAgentId = resolveKnownAgentId({
+    cfg: params.cfg,
+    rawAgentId: params.rawAgentId,
+  });
+  const agentId = explicitAgentId ?? defaultAgentId;
   const dockerHelperAgentId = resolveDockerHelperTargetAgentId();
   const useDockerHelperOverrides = dockerHelperAgentId === agentId;
-  const hasEnvAgentOverride =
-    Boolean(process.env.OPENCLAW_AGENT_DIR?.trim()) ||
-    Boolean(process.env.PI_CODING_AGENT_DIR?.trim());
-  const agentDir =
-    useDockerHelperOverrides || (hasEnvAgentOverride && agentId === defaultAgentId)
-      ? resolveOpenClawAgentDir()
-      : resolveAgentDir(params.cfg, agentId);
+  const agentDir = useDockerHelperOverrides
+    ? resolveOpenClawAgentDir()
+    : resolveAgentDir(params.cfg, agentId);
   const workspaceOverride = useDockerHelperOverrides
     ? resolveHostAuthWorkspaceOverride()
     : undefined;
