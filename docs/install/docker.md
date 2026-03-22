@@ -141,11 +141,17 @@ OPENCLAW_CONFIG_DIR=~/.openclaw \
 ```
 
 The script points host-side CLI commands at the bind-mounted state directory and targets the
-default `main` agent unless you override `OPENCLAW_DOCKER_AUTH_AGENT_ID`.
+configured default agent by default (falling back to `main` when no agents are configured). When
+you override `OPENCLAW_DOCKER_AUTH_AGENT_ID` to target a non-default agent without setting
+`OPENCLAW_WORKSPACE_DIR`, the helper falls back to that agent's default workspace path inside the
+bind-mounted state directory (for example `~/.openclaw/workspace-ops` for agent `ops`).
+It always binds `OPENCLAW_AGENT_DIR` and `PI_CODING_AGENT_DIR` back into
+`OPENCLAW_CONFIG_DIR`, so pre-existing host env overrides do not redirect writes outside the
+Docker-backed state.
 
-For plugin-based auth flows, also set `OPENCLAW_WORKSPACE_DIR` to the same host workspace path
-that Docker Compose mounts into `/home/node/.openclaw/workspace`, so provider discovery matches
-the container:
+For plugin-based auth flows, set `OPENCLAW_WORKSPACE_DIR` only when you need an explicit host
+workspace override, such as a custom path mounted into `/home/node/.openclaw/workspace`, so
+provider discovery matches the container:
 
 ```bash
 OPENCLAW_CONFIG_DIR=~/.openclaw \
