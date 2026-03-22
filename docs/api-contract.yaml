@@ -1,0 +1,459 @@
+openapi: 3.1.0
+info:
+  title: SmartThings Adapter API
+  version: 0.1.0
+  summary: Skill-first SmartThings adapter contract for OpenClaw milestone 1
+  description: >
+    Separate adapter service contract for Samsung SmartThings integration.
+    The OpenClaw skill calls this API instead of calling SmartThings directly.
+servers:
+  - url: http://127.0.0.1:8787
+    description: Local development adapter
+tags:
+  - name: health
+  - name: devices
+  - name: subscriptions
+  - name: webhooks
+paths:
+  /health:
+    get:
+      tags: [health]
+      summary: Report adapter health and active auth mode
+      operationId: getHealth
+      responses:
+        "200":
+          description: Adapter health
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /devices:
+    get:
+      tags: [devices]
+      summary: List SmartThings devices visible to the adapter
+      operationId: listDevices
+      responses:
+        "200":
+          description: Device summaries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [count, items]
+                properties:
+                  count:
+                    type: integer
+                    minimum: 0
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DeviceSummary"
+                  devices:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DeviceSummary"
+  /devices/{deviceId}/status:
+    get:
+      tags: [devices]
+      summary: Fetch raw SmartThings status and normalized TV state
+      operationId: getDeviceStatus
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      responses:
+        "200":
+          description: Device status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceStatusResponse"
+        "404":
+          description: Device not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /devices/{deviceId}/commands:
+    post:
+      tags: [devices]
+      summary: Send a SmartThings device command
+      operationId: commandDevice
+      parameters:
+        - $ref: "#/components/parameters/DeviceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandDeviceRequest"
+      responses:
+        "202":
+          description: Command accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CommandDeviceResponse"
+        "400":
+          description: Invalid command payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /subscriptions/bootstrap:
+    post:
+      tags: [subscriptions]
+      summary: Bootstrap or validate SmartThings subscription setup
+      operationId: bootstrapSubscriptions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BootstrapRequest"
+      responses:
+        "200":
+          description: Bootstrap result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BootstrapResponse"
+        "400":
+          description: Invalid bootstrap request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: OAuth refresh or SmartThings configuration is unavailable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /webhooks/smartthings:
+    post:
+      tags: [webhooks]
+      summary: Receive SmartThings lifecycle and event callbacks
+      operationId: receiveSmartThingsWebhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SmartThingsWebhookEnvelope"
+      responses:
+        "200":
+          description: Lifecycle handled
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/WebhookAckResponse"
+                  - $ref: "#/components/schemas/WebhookConfirmationResponse"
+                  - $ref: "#/components/schemas/WebhookConfigurationResponse"
+        "401":
+          description: Missing or invalid SmartThings webhook signature
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "415":
+          description: Unsupported SmartThings webhook media type
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+components:
+  parameters:
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    HealthResponse:
+      type: object
+      required: [ok, mode, smartthings, readiness, blockers]
+      properties:
+        ok:
+          type: boolean
+        mode:
+          type: string
+          enum: [pat-dev, oauth-smartapp]
+        blockers:
+          type: array
+          items:
+            type: string
+        readiness:
+          $ref: "#/components/schemas/HealthReadiness"
+        smartthings:
+          type: object
+          required: [baseUrl, authConfigured, webhookPath]
+          properties:
+            baseUrl:
+              type: string
+            authConfigured:
+              type: boolean
+            installedAppId:
+              type: string
+            webhookPath:
+              type: string
+        notes:
+          type: array
+          items:
+            type: string
+    HealthReadiness:
+      type: object
+      required:
+        [
+          patReady,
+          oauthWebhookReady,
+          oauthRefreshReady,
+          installedAppContextReady,
+          webhookVerificationReady,
+          oauthDryRunReady,
+        ]
+      properties:
+        patReady:
+          type: boolean
+        oauthWebhookReady:
+          type: boolean
+        oauthRefreshReady:
+          type: boolean
+        installedAppContextReady:
+          type: boolean
+        webhookVerificationReady:
+          type: boolean
+        oauthDryRunReady:
+          type: boolean
+    DeviceSummary:
+      type: object
+      required: [deviceId, label, capabilities, isTvCandidate]
+      properties:
+        deviceId:
+          type: string
+        label:
+          type: string
+        name:
+          type: string
+        locationId:
+          type: string
+        roomId:
+          type: string
+        manufacturerName:
+          type: string
+        deviceTypeName:
+          type: string
+        isTvCandidate:
+          type: boolean
+        capabilities:
+          type: array
+          items:
+            type: string
+    DeviceStatusResponse:
+      type: object
+      required: [device, normalized, normalizedState, raw]
+      properties:
+        device:
+          $ref: "#/components/schemas/DeviceSummary"
+        normalized:
+          $ref: "#/components/schemas/NormalizedDeviceState"
+        normalizedState:
+          $ref: "#/components/schemas/NormalizedStateAlias"
+        raw:
+          type: object
+          additionalProperties: true
+    NormalizedDeviceState:
+      type: object
+      required: [kind, state, tvState]
+      properties:
+        kind:
+          type: string
+          enum: [tv]
+        state:
+          type: string
+          enum: [offline, standby, on, unknown]
+          description: Compatibility alias for `tvState`
+        tvState:
+          type: string
+          enum: [offline, standby, on, unknown]
+        reasons:
+          type: array
+          items:
+            type: string
+        capabilitiesSeen:
+          type: array
+          items:
+            type: string
+        observedAt:
+          type: string
+          description: Adapter observation timestamp in ISO 8601 form
+    NormalizedStateAlias:
+      type: object
+      required: [state, source]
+      properties:
+        state:
+          type: string
+          enum: [offline, standby, on, unknown]
+        source:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+    CommandDeviceRequest:
+      type: object
+      required: [commands]
+      properties:
+        commands:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/CommandRequestItem"
+    CommandRequestItem:
+      type: object
+      required: [capability, command]
+      properties:
+        component:
+          type: string
+          default: main
+        capability:
+          type: string
+        command:
+          type: string
+        arguments:
+          type: array
+          items: {}
+    CommandDeviceResponse:
+      type: object
+      required: [accepted, deviceId, commands, results]
+      properties:
+        accepted:
+          type: boolean
+        deviceId:
+          type: string
+        commands:
+          type: array
+          items:
+            $ref: "#/components/schemas/CommandRequestItem"
+        results:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        upstream: {}
+    BootstrapRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [pat-dev, oauth-smartapp]
+        authToken:
+          type: string
+        publicBaseUrl:
+          type: string
+        callbackPath:
+          type: string
+          default: /webhooks/smartthings
+        installedAppId:
+          type: string
+        devices:
+          type: array
+          items:
+            oneOf:
+              - type: string
+              - type: object
+                required: [deviceId]
+                properties:
+                  attribute:
+                    type: string
+                  capability:
+                    type: string
+                  componentId:
+                    type: string
+                  deviceId:
+                    type: string
+                  stateChangeOnly:
+                    type: boolean
+                  subscriptionName:
+                    type: string
+                  value: {}
+        replaceExisting:
+          type: boolean
+    BootstrapResponse:
+      type: object
+      required: [mode, subscriptionState, webhookUrl]
+      properties:
+        mode:
+          type: string
+          enum: [pat-dev, oauth-smartapp]
+        subscriptionState:
+          type: string
+          enum: [noop, pending-confirmation, active]
+        webhookUrl:
+          type: string
+        notes:
+          type: array
+          items:
+            type: string
+    SmartThingsWebhookEnvelope:
+      type: object
+      required: [lifecycle]
+      properties:
+        lifecycle:
+          type: string
+          description: >
+            SmartThings lifecycle discriminator such as CONFIRMATION, EVENT,
+            INSTALL, UPDATE, or UNINSTALL.
+        confirmationData:
+          type: object
+          additionalProperties: true
+        configurationData:
+          type: object
+          additionalProperties: true
+        executionId:
+          type: string
+        installData:
+          type: object
+          additionalProperties: true
+        pingData:
+          type: object
+          additionalProperties: true
+        updateData:
+          type: object
+          additionalProperties: true
+    WebhookAckResponse:
+      type: object
+      required: [acknowledged, lifecycle]
+      properties:
+        acknowledged:
+          type: boolean
+        lifecycle:
+          type: string
+        replayed:
+          type: boolean
+        pingData:
+          type: object
+          additionalProperties: true
+    WebhookConfirmationResponse:
+      type: object
+      required: [targetUrl]
+      properties:
+        targetUrl:
+          type: string
+    WebhookConfigurationResponse:
+      type: object
+      required: [configurationData]
+      properties:
+        configurationData:
+          type: object
+          additionalProperties: true
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        upstreamStatus:
+          type: integer
+        upstreamBody: {}

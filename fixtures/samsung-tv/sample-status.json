@@ -1,0 +1,58 @@
+{
+  "components": {
+    "main": {
+      "audioMute": {
+        "mute": {
+          "value": "unmuted",
+          "timestamp": "2025-03-13T08:15:40.000Z"
+        }
+      },
+      "audioVolume": {
+        "volume": {
+          "value": 18,
+          "unit": "%",
+          "timestamp": "2025-03-13T08:15:40.000Z"
+        }
+      },
+      "healthCheck": {
+        "DeviceWatch-DeviceStatus": {
+          "value": "online",
+          "timestamp": "2025-03-13T08:15:39.000Z"
+        }
+      },
+      "mediaInputSource": {
+        "inputSource": {
+          "value": "HDMI1",
+          "timestamp": "2025-03-13T08:15:40.000Z"
+        }
+      },
+      "ocf": {
+        "di": {
+          "value": "f6f72877-12ab-4f4b-9b63-111122223333"
+        },
+        "mnmn": {
+          "value": "Samsung Electronics"
+        },
+        "n": {
+          "value": "Samsung TV"
+        },
+        "st": {
+          "value": "connected",
+          "timestamp": "2025-03-13T08:15:39.000Z"
+        }
+      },
+      "refresh": {
+        "refresh": {
+          "value": "ready",
+          "timestamp": "2025-03-13T08:15:40.000Z"
+        }
+      },
+      "switch": {
+        "switch": {
+          "value": "on",
+          "timestamp": "2025-03-13T08:15:40.000Z"
+        }
+      }
+    }
+  }
+}

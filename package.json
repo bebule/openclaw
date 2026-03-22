@@ -226,6 +226,7 @@
     "build": "pnpm canvas:a2ui:bundle && node scripts/tsdown-build.mjs && node scripts/copy-plugin-sdk-root-alias.mjs && pnpm build:plugin-sdk:dts && node --import tsx scripts/write-plugin-sdk-entry-dts.ts && node --import tsx scripts/canvas-a2ui-copy.ts && node --import tsx scripts/copy-hook-metadata.ts && node --import tsx scripts/copy-export-html-templates.ts && node --import tsx scripts/write-build-info.ts && node --import tsx scripts/write-cli-startup-metadata.ts && node --import tsx scripts/write-cli-compat.ts",
     "build:docker": "node scripts/tsdown-build.mjs && node scripts/copy-plugin-sdk-root-alias.mjs && pnpm build:plugin-sdk:dts && node --import tsx scripts/write-plugin-sdk-entry-dts.ts && node --import tsx scripts/canvas-a2ui-copy.ts && node --import tsx scripts/copy-hook-metadata.ts && node --import tsx scripts/copy-export-html-templates.ts && node --import tsx scripts/write-build-info.ts && node --import tsx scripts/write-cli-startup-metadata.ts && node --import tsx scripts/write-cli-compat.ts",
     "build:plugin-sdk:dts": "tsc -p tsconfig.plugin-sdk.dts.json",
+    "build:smartthings": "node scripts/build-smartthings-adapter.mjs",
     "build:strict-smoke": "pnpm canvas:a2ui:bundle && node scripts/tsdown-build.mjs && node scripts/copy-plugin-sdk-root-alias.mjs && pnpm build:plugin-sdk:dts",
     "canvas:a2ui:bundle": "bash scripts/bundle-a2ui.sh",
     "check": "pnpm check:host-env-policy:swift && pnpm format:check && pnpm tsgo && pnpm lint && pnpm lint:tmp:no-random-messaging && pnpm lint:tmp:channel-agnostic-boundaries && pnpm lint:tmp:no-raw-channel-fetch && pnpm lint:agent:ingress-owner && pnpm lint:plugins:no-register-http-handler && pnpm lint:plugins:no-monolithic-plugin-sdk-entry-imports && pnpm lint:webhook:no-low-level-body-read && pnpm lint:auth:no-pairing-store-group && pnpm lint:auth:pairing-account-scope",
@@ -335,7 +336,9 @@
     "tui:dev": "OPENCLAW_PROFILE=dev CLAWDBOT_PROFILE=dev node scripts/run-node.mjs --dev tui",
     "ui:build": "node scripts/ui.js build",
     "ui:dev": "node scripts/ui.js dev",
-    "ui:install": "node scripts/ui.js install"
+    "ui:install": "node scripts/ui.js install",
+    "validate:smartthings": "pnpm exec vitest run adapter/src/app.test.ts adapter/src/api-contract.test.ts adapter/src/device-normalizer.test.ts adapter/src/oauth-refresh.test.ts adapter/src/oauth-state-store.test.ts adapter/src/routes/devices.test.ts adapter/src/routes/webhooks.test.ts adapter/src/smartthings-client.test.ts adapter/src/webhook-trust.test.ts extensions/smartthings/index.test.ts extensions/smartthings/skill-pack-parity.test.ts extensions/smartthings/skills/smartthings/bin/_smartthings-client.test.ts extensions/smartthings/skills/smartthings/bin/_smartthings-client.integration.test.ts src/config/config.plugin-validation.test.ts && pnpm exec tsc -p adapter/tsconfig.json --noEmit",
+    "validate:smartthings:release": "pnpm validate:smartthings && pnpm build:smartthings"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "0.16.1",

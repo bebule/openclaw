@@ -1,0 +1,24 @@
+{
+  "components": {
+    "main": {
+      "healthCheck": {
+        "DeviceWatch-DeviceStatus": {
+          "value": "online",
+          "timestamp": "2025-03-13T08:15:39.000Z"
+        }
+      },
+      "ocf": {
+        "st": {
+          "value": "connected",
+          "timestamp": "2025-03-13T08:15:39.000Z"
+        }
+      },
+      "switch": {
+        "switch": {
+          "value": "off",
+          "timestamp": "2025-03-13T08:15:40.000Z"
+        }
+      }
+    }
+  }
+}
