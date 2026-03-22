@@ -105,7 +105,9 @@ ensure_control_ui_allowed_origins() {
 
   local allowed_origin_json
   local current_allowed_origins
-  allowed_origin_json="$(printf '["http://127.0.0.1:%s"]' "$OPENCLAW_GATEWAY_PORT")"
+  local gateway_host_port
+  gateway_host_port="$(resolve_compose_host_port "$OPENCLAW_GATEWAY_PORT")"
+  allowed_origin_json="$(printf '["http://127.0.0.1:%s"]' "$gateway_host_port")"
   current_allowed_origins="$(
     docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli \
       config get gateway.controlUi.allowedOrigins 2>/dev/null || true
@@ -128,6 +130,19 @@ sync_gateway_mode_and_bind() {
   docker compose "${COMPOSE_ARGS[@]}" run --rm openclaw-cli \
     config set gateway.bind "$OPENCLAW_GATEWAY_BIND" >/dev/null
   echo "Pinned gateway.mode=local and gateway.bind=$OPENCLAW_GATEWAY_BIND for Docker setup."
+}
+
+resolve_compose_host_port() {
+  local published="$1"
+  if [[ "$published" =~ ^\[[^]]+\]:(.+)$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  if [[ "$published" =~ ^[^:]+:([0-9]+)$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  printf '%s' "$published"
 }
 
 contains_disallowed_chars() {
@@ -213,8 +228,8 @@ mkdir -p "$OPENCLAW_CONFIG_DIR/agents/main/sessions"
 
 export OPENCLAW_CONFIG_DIR
 export OPENCLAW_WORKSPACE_DIR
-export OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-18789}"
-export OPENCLAW_BRIDGE_PORT="${OPENCLAW_BRIDGE_PORT:-18790}"
+export OPENCLAW_GATEWAY_PORT="${OPENCLAW_GATEWAY_PORT:-127.0.0.1:18789}"
+export OPENCLAW_BRIDGE_PORT="${OPENCLAW_BRIDGE_PORT:-127.0.0.1:18790}"
 export OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-lan}"
 export OPENCLAW_IMAGE="$IMAGE_NAME"
 export OPENCLAW_DOCKER_APT_PACKAGES="${OPENCLAW_DOCKER_APT_PACKAGES:-}"
@@ -446,8 +461,9 @@ docker compose "${COMPOSE_ARGS[@]}" run --rm --user root --entrypoint sh opencla
 echo ""
 echo "==> Onboarding (interactive)"
 echo "Docker setup pins Gateway mode to local."
-echo "Gateway runtime bind comes from OPENCLAW_GATEWAY_BIND (default: lan)."
+echo "Gateway runtime bind comes from OPENCLAW_GATEWAY_BIND (default: lan for Docker bridge networking)."
 echo "Current runtime bind: $OPENCLAW_GATEWAY_BIND"
+echo "Host-published Gateway port: $OPENCLAW_GATEWAY_PORT"
 echo "Gateway token: $OPENCLAW_GATEWAY_TOKEN"
 echo "Tailscale exposure: Off (use host-level tailnet/Tailscale setup separately)."
 echo "Install Gateway daemon: No (managed by Docker Compose)"

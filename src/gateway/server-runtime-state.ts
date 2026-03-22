@@ -40,6 +40,34 @@ import type { ReadinessChecker } from "./server/readiness.js";
 import type { GatewayTlsRuntime } from "./server/tls.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
 
+function isLoopbackPublishedGatewayPortHint(value: string | undefined): boolean {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return (
+    trimmed.startsWith("127.0.0.1:") ||
+    trimmed.startsWith("localhost:") ||
+    trimmed.startsWith("[::1]:")
+  );
+}
+
+export function shouldWarnOnNonLoopbackBind(params: {
+  bindHost: string;
+  env?: NodeJS.ProcessEnv;
+}): boolean {
+  if (isLoopbackHost(params.bindHost)) {
+    return false;
+  }
+  const env = params.env ?? process.env;
+  // Docker Compose commonly needs an internal lan bind so published ports work,
+  // but a 127.0.0.1 host publish still keeps the surface loopback-only.
+  if (isLoopbackPublishedGatewayPortHint(env.OPENCLAW_PUBLISHED_GATEWAY_PORT)) {
+    return false;
+  }
+  return true;
+}
+
 export async function createGatewayRuntimeState(params: {
   cfg: import("../config/config.js").OpenClawConfig;
   bindHost: string;
@@ -133,7 +161,7 @@ export async function createGatewayRuntimeState(params: {
   };
 
   const bindHosts = await resolveGatewayListenHosts(params.bindHost);
-  if (!isLoopbackHost(params.bindHost)) {
+  if (shouldWarnOnNonLoopbackBind({ bindHost: params.bindHost })) {
     params.log.warn(
       "⚠️  Gateway is binding to a non-loopback address. " +
         "Ensure authentication is configured before exposing to public networks.",

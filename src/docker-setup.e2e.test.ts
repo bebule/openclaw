@@ -176,6 +176,8 @@ describe("docker-setup.sh", () => {
     expect(envFile).toContain("OPENCLAW_DOCKER_APT_PACKAGES=ffmpeg build-essential");
     expect(envFile).toContain("OPENCLAW_EXTRA_MOUNTS=");
     expect(envFile).toContain("OPENCLAW_HOME_VOLUME=openclaw-home"); // pragma: allowlist secret
+    expect(envFile).toContain("OPENCLAW_GATEWAY_PORT=127.0.0.1:18789");
+    expect(envFile).toContain("OPENCLAW_BRIDGE_PORT=127.0.0.1:18790");
     const extraCompose = await readFile(
       join(activeSandbox.rootDir, "docker-compose.extra.yml"),
       "utf8",
@@ -257,7 +259,7 @@ describe("docker-setup.sh", () => {
     await mkdir(configDir, { recursive: true });
     await writeFile(
       join(activeSandbox.rootDir, ".env"),
-      "OPENCLAW_GATEWAY_TOKEN=dotenv-token-123\nOPENCLAW_GATEWAY_PORT=18789\n", // pragma: allowlist secret
+      "OPENCLAW_GATEWAY_TOKEN=dotenv-token-123\nOPENCLAW_GATEWAY_PORT=127.0.0.1:18789\n", // pragma: allowlist secret
     );
 
     const result = runDockerSetup(activeSandbox, {

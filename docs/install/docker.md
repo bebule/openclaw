@@ -539,12 +539,28 @@ pnpm test:docker:qr
 
 ### LAN vs loopback (Docker Compose)
 
-`docker-setup.sh` defaults `OPENCLAW_GATEWAY_BIND=lan` so host access to
-`http://127.0.0.1:18789` works with Docker port publishing.
+Docker Compose keeps `OPENCLAW_GATEWAY_BIND=lan` **inside the container** so the
+published port works with Docker bridge networking, but it now publishes the
+host ports on loopback by default:
 
-- `lan` (default): host browser + host CLI can reach the published gateway port.
-- `loopback`: only processes inside the container network namespace can reach
-  the gateway directly; host-published port access may fail.
+- `OPENCLAW_GATEWAY_PORT=127.0.0.1:18789`
+- `OPENCLAW_BRIDGE_PORT=127.0.0.1:18790`
+
+- Internal `lan` bind (default): required for the containerized gateway to
+  answer Docker-published traffic.
+- Internal `loopback`: usually breaks host `127.0.0.1:18789` access with normal
+  Docker Compose port publishing.
+- Host loopback publish (default): browser + CLI on the host can reach
+  `http://127.0.0.1:18789`, but the gateway is not exposed on the host LAN.
+
+To intentionally expose Docker on the host LAN, set explicit host publish
+targets before running `docker-setup.sh`:
+
+```bash
+export OPENCLAW_GATEWAY_PORT=18789
+export OPENCLAW_BRIDGE_PORT=18790
+./docker-setup.sh
+```
 
 The setup script also pins `gateway.mode=local` after onboarding so Docker CLI
 commands default to local loopback targeting.
@@ -564,7 +580,8 @@ docker compose run --rm openclaw-cli devices list --url ws://127.0.0.1:18789
 
 ### Notes
 
-- Gateway bind defaults to `lan` for container use (`OPENCLAW_GATEWAY_BIND`).
+- Docker defaults to loopback-only host port publishing, while the container
+  keeps `gateway.bind=lan` so Docker bridge traffic can reach the service.
 - Dockerfile CMD uses `--allow-unconfigured`; mounted config with `gateway.mode` not `local` will still start. Override CMD to enforce the guard.
 - The gateway container is the source of truth for sessions (`~/.openclaw/agents/<agentId>/sessions/`).
 
