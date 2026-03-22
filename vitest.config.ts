@@ -80,6 +80,7 @@ export default defineConfig({
     maxWorkers: isCI ? ciWorkers : localWorkers,
     include: [
       "src/**/*.test.ts",
+      "adapter/src/**/*.test.ts",
       "extensions/**/*.test.ts",
       "test/**/*.test.ts",
       "ui/src/ui/app-chat.test.ts",

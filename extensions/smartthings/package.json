@@ -1,0 +1,21 @@
+{
+  "name": "@openclaw/smartthings",
+  "version": "2026.3.12",
+  "private": true,
+  "description": "Internal OpenClaw SmartThings skill-pack plugin",
+  "files": [
+    "README.md",
+    "index.ts",
+    "openclaw.plugin.json",
+    "skills"
+  ],
+  "type": "module",
+  "dependencies": {
+    "json5": "^2.2.3"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

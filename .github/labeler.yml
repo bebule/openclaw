@@ -256,3 +256,15 @@
   - changed-files:
       - any-glob-to-any-file:
           - "extensions/talk-voice/**"
+"extensions: smartthings":
+  - changed-files:
+      - any-glob-to-any-file:
+          - "adapter/**"
+          - "docs/api-contract.yaml"
+          - "docs/architecture.md"
+          - "docs/failure-matrix.md"
+          - "docs/state-model.md"
+          - "docs/test-plan.md"
+          - "extensions/smartthings/**"
+          - "fixtures/samsung-tv/**"
+          - "skills/smartthings/**"

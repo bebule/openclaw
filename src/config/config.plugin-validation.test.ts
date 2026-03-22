@@ -50,6 +50,7 @@ describe("config plugin validation", () => {
   let badPluginDir = "";
   let enumPluginDir = "";
   let bluebubblesPluginDir = "";
+  let smartThingsSchemaPluginDir = "";
   let voiceCallSchemaPluginDir = "";
   const suiteEnv = () =>
     ({
@@ -104,6 +105,24 @@ describe("config plugin validation", () => {
       channels: ["bluebubbles"],
       schema: { type: "object" },
     });
+    smartThingsSchemaPluginDir = path.join(suiteHome, "smartthings-schema-plugin");
+    const smartThingsManifestPath = path.join(
+      process.cwd(),
+      "extensions",
+      "smartthings",
+      "openclaw.plugin.json",
+    );
+    const smartThingsManifest = JSON.parse(await fs.readFile(smartThingsManifestPath, "utf-8")) as {
+      configSchema?: Record<string, unknown>;
+    };
+    if (!smartThingsManifest.configSchema) {
+      throw new Error("smartthings manifest missing configSchema");
+    }
+    await writePluginFixture({
+      dir: smartThingsSchemaPluginDir,
+      id: "smartthings-schema-fixture",
+      schema: smartThingsManifest.configSchema,
+    });
     voiceCallSchemaPluginDir = path.join(suiteHome, "voice-call-schema-plugin");
     const voiceCallManifestPath = path.join(
       process.cwd(),
@@ -128,7 +147,14 @@ describe("config plugin validation", () => {
     validateInSuite({
       plugins: {
         enabled: false,
-        load: { paths: [badPluginDir, bluebubblesPluginDir, voiceCallSchemaPluginDir] },
+        load: {
+          paths: [
+            badPluginDir,
+            bluebubblesPluginDir,
+            smartThingsSchemaPluginDir,
+            voiceCallSchemaPluginDir,
+          ],
+        },
       },
     });
   });
@@ -286,6 +312,50 @@ describe("config plugin validation", () => {
       },
     });
     expect(res.ok).toBe(true);
+  });
+
+  it("accepts SmartThings adapterUrl and adapterToken plugin config", async () => {
+    const res = validateInSuite({
+      agents: { list: [{ id: "pi" }] },
+      plugins: {
+        enabled: true,
+        load: { paths: [smartThingsSchemaPluginDir] },
+        entries: {
+          "smartthings-schema-fixture": {
+            config: {
+              adapterToken: "secret-token",
+              adapterUrl: "http://127.0.0.1:8787",
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(true);
+  });
+
+  it("rejects invalid SmartThings adapterUrl types", async () => {
+    const res = validateInSuite({
+      agents: { list: [{ id: "pi" }] },
+      plugins: {
+        enabled: true,
+        load: { paths: [smartThingsSchemaPluginDir] },
+        entries: {
+          "smartthings-schema-fixture": {
+            config: {
+              adapterUrl: 8787,
+            },
+          },
+        },
+      },
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      const issue = res.issues.find(
+        (entry) => entry.path === "plugins.entries.smartthings-schema-fixture.config.adapterUrl",
+      );
+      expect(issue).toBeDefined();
+      expect(issue?.message).toContain("must be string");
+    }
   });
 
   it("accepts voice-call OpenAI TTS speed, instructions, and baseUrl config fields", async () => {

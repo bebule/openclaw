@@ -1,0 +1,13 @@
+{
+  "name": "@openclaw/smartthings-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone SmartThings adapter for OpenClaw milestone 1",
+  "type": "module",
+  "scripts": {
+    "build": "cd .. && node scripts/build-smartthings-adapter.mjs",
+    "check": "cd .. && pnpm exec tsc -p adapter/tsconfig.json --noEmit",
+    "dev": "cd .. && pnpm exec tsx watch adapter/src/app.ts",
+    "start": "node dist/app.js"
+  }
+}

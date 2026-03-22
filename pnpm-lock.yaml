@@ -457,6 +457,12 @@ importers:
 
   extensions/slack: {}
 
+  extensions/smartthings:
+    dependencies:
+      json5:
+        specifier: ^2.2.3
+        version: 2.2.3
+
   extensions/synology-chat:
     dependencies:
       zod:

@@ -1,0 +1,31 @@
+{
+  "id": "smartthings",
+  "name": "SmartThings",
+  "description": "Samsung SmartThings skill pack for OpenClaw. Milestone 1 ships plugin-managed skills plus plugin config for the external adapter bridge.",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "description": "Config for the external SmartThings adapter used by the milestone 1 skill pack. Environment variables still override these values at runtime.",
+    "additionalProperties": false,
+    "properties": {
+      "adapterUrl": {
+        "type": "string",
+        "description": "Base URL for the external SmartThings adapter. When unset, helper scripts fall back to http://127.0.0.1:8787."
+      },
+      "adapterToken": {
+        "type": "string",
+        "description": "Optional bearer token sent to the SmartThings adapter."
+      }
+    }
+  },
+  "uiHints": {
+    "adapterUrl": {
+      "label": "Adapter URL",
+      "placeholder": "http://127.0.0.1:8787"
+    },
+    "adapterToken": {
+      "label": "Adapter Token",
+      "sensitive": true
+    }
+  }
+}

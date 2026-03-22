@@ -1,0 +1,18 @@
+{
+  "components": {
+    "main": {
+      "ocf": {
+        "st": {
+          "value": "connected",
+          "timestamp": "2025-03-13T08:15:39.000Z"
+        }
+      },
+      "switch": {
+        "switch": {
+          "value": "on",
+          "timestamp": "2025-03-13T08:15:40.000Z"
+        }
+      }
+    }
+  }
+}
