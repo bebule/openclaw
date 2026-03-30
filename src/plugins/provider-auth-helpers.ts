@@ -3,8 +3,8 @@ import path from "node:path";
 import type { OAuthCredentials } from "@mariozechner/pi-ai";
 import { resolveOpenClawAgentDir } from "../agents/agent-paths.js";
 import { buildAuthProfileId } from "../agents/auth-profiles/identity.js";
-import { upsertAuthProfile } from "../agents/auth-profiles/profiles.js";
 import { normalizeProviderIdForAuth } from "../agents/provider-id.js";
+import { upsertAuthProfileOrThrow } from "../commands/auth-profile-write.js";
 import type { OpenClawConfig } from "../config/config.js";
 import { resolveStateDir } from "../config/paths.js";
 import {
@@ -257,7 +257,7 @@ export async function writeOAuthCredentials(
     ...(options?.displayName ? { displayName: options.displayName } : {}),
   };
 
-  upsertAuthProfile({
+  await upsertAuthProfileOrThrow({
     profileId,
     credential,
     agentDir: resolvedAgentDir,
@@ -271,7 +271,7 @@ export async function writeOAuthCredentials(
         continue;
       }
       try {
-        upsertAuthProfile({
+        await upsertAuthProfileOrThrow({
           profileId,
           credential,
           agentDir: targetAgentDir,

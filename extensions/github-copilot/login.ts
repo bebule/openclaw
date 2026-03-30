@@ -1,12 +1,19 @@
 import { intro, note, outro, spinner } from "@clack/prompts";
+import { resolveAgentDir, resolveDefaultAgentId } from "openclaw/plugin-sdk/agent-runtime";
 import { stylePromptTitle } from "openclaw/plugin-sdk/cli-runtime";
 import { logConfigUpdated, updateConfig } from "openclaw/plugin-sdk/config-runtime";
 import {
   applyAuthProfileConfig,
   ensureAuthProfileStore,
-  upsertAuthProfile,
 } from "openclaw/plugin-sdk/provider-auth";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime";
+import { resolveOpenClawAgentDir } from "../../src/agents/agent-paths.js";
+import { upsertAuthProfileOrThrow } from "../../src/commands/auth-profile-write.js";
+import {
+  loadValidConfigOrThrow,
+  resolveKnownAgentId,
+} from "../../src/commands/models/shared.js";
+import { normalizeAgentId } from "../../src/routing/session-key.js";
 
 const CLIENT_ID = "Iv1.b507a08c87ecfe98";
 const DEVICE_CODE_URL = "https://github.com/login/device/code";
@@ -116,8 +123,40 @@ async function pollForAccessToken(params: {
   throw new Error("GitHub device code expired; run login again");
 }
 
+function resolveDockerHelperTargetAgentId(): string | undefined {
+  const raw = process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID?.trim();
+  return raw ? normalizeAgentId(raw) : undefined;
+}
+
+async function resolveGithubCopilotAuthAgentDir(rawAgentId?: string): Promise<string> {
+  const cfg = await loadValidConfigOrThrow();
+  const defaultAgentId = resolveDefaultAgentId(cfg);
+  const explicitAgentId = resolveKnownAgentId({
+    cfg,
+    rawAgentId,
+  });
+  const agentId = explicitAgentId ?? defaultAgentId;
+  const dockerHelperAgentId = resolveDockerHelperTargetAgentId();
+  if (dockerHelperAgentId === agentId) {
+    return resolveOpenClawAgentDir();
+  }
+
+  return resolveAgentDir(cfg, agentId);
+}
+
+async function resolveGithubCopilotStoreDir(opts: {
+  agent?: string;
+  agentDir?: string;
+}): Promise<string> {
+  const explicitAgentDir = opts.agentDir?.trim();
+  if (explicitAgentDir) {
+    return explicitAgentDir;
+  }
+  return await resolveGithubCopilotAuthAgentDir(opts.agent);
+}
+
 export async function githubCopilotLoginCommand(
-  opts: { profileId?: string; yes?: boolean },
+  opts: { profileId?: string; yes?: boolean; agent?: string; agentDir?: string },
   runtime: RuntimeEnv,
 ) {
   if (!process.stdin.isTTY) {
@@ -127,7 +166,8 @@ export async function githubCopilotLoginCommand(
   intro(stylePromptTitle("GitHub Copilot login"));
 
   const profileId = opts.profileId?.trim() || "github-copilot:github";
-  const store = ensureAuthProfileStore(undefined, {
+  const agentDir = await resolveGithubCopilotStoreDir(opts);
+  const store = ensureAuthProfileStore(agentDir, {
     allowKeychainPrompt: false,
   });
 
@@ -160,7 +200,7 @@ export async function githubCopilotLoginCommand(
   });
   polling.stop("GitHub access token acquired");
 
-  upsertAuthProfile({
+  await upsertAuthProfileOrThrow({
     profileId,
     credential: {
       type: "token",
@@ -169,6 +209,7 @@ export async function githubCopilotLoginCommand(
       // GitHub device flow token doesn't reliably include expiry here.
       // Leave expires unset; we'll exchange into Copilot token plus expiry later.
     },
+    agentDir,
   });
 
   await updateConfig((cfg) =>

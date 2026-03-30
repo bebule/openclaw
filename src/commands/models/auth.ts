@@ -5,6 +5,7 @@ import {
   select as clackSelect,
   text as clackText,
 } from "@clack/prompts";
+import { resolveOpenClawAgentDir } from "../../agents/agent-paths.js";
 import {
   resolveAgentDir,
   resolveAgentWorkspaceDir,
@@ -14,7 +15,6 @@ import {
   clearAuthProfileCooldown,
   listProfilesForProvider,
   loadAuthProfileStoreForRuntime,
-  upsertAuthProfile,
 } from "../../agents/auth-profiles.js";
 import type { AuthProfileCredential } from "../../agents/auth-profiles/types.js";
 import { normalizeProviderId } from "../../agents/model-selection.js";
@@ -30,9 +30,12 @@ import type {
   ProviderAuthResult,
   ProviderPlugin,
 } from "../../plugins/types.js";
+import { normalizeAgentId } from "../../routing/session-key.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { stylePromptHint, stylePromptMessage } from "../../terminal/prompt-style.js";
+import { resolveUserPath } from "../../utils.js";
 import { createClackPrompter } from "../../wizard/clack-prompter.js";
+import { upsertAuthProfileOrThrow } from "../auth-profile-write.js";
 import { isRemoteEnvironment } from "../oauth-env.js";
 import { createVpsAwareOAuthHandlers } from "../oauth-flow.js";
 import { openUrl } from "../onboard-helpers.js";
@@ -42,7 +45,7 @@ import {
   pickAuthMethod,
   resolveProviderMatch,
 } from "../provider-auth-helpers.js";
-import { loadValidConfigOrThrow, updateConfig } from "./shared.js";
+import { loadValidConfigOrThrow, resolveKnownAgentId, updateConfig } from "./shared.js";
 
 function guardCancel<T>(value: T | symbol): T {
   if (typeof value === "symbol" || isCancel(value)) {
@@ -100,12 +103,45 @@ function listProvidersWithTokenMethods(providers: ProviderPlugin[]): ProviderPlu
   return providers.filter((provider) => listTokenAuthMethods(provider).length > 0);
 }
 
-async function resolveModelsAuthContext(): Promise<ResolvedModelsAuthContext> {
-  const config = await loadValidConfigOrThrow();
-  const defaultAgentId = resolveDefaultAgentId(config);
-  const agentDir = resolveAgentDir(config, defaultAgentId);
+function resolveDockerHelperTargetAgentId(): string | undefined {
+  const raw = process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID?.trim();
+  return raw ? normalizeAgentId(raw) : undefined;
+}
+
+function resolveHostAuthWorkspaceOverride(): string | undefined {
+  const raw =
+    process.env.OPENCLAW_WORKSPACE_DIR?.trim() || process.env.CLAWDBOT_WORKSPACE_DIR?.trim();
+  return raw ? resolveUserPath(raw) : undefined;
+}
+
+function resolveAuthTargetContext(params: {
+  cfg: Awaited<ReturnType<typeof loadValidConfigOrThrow>>;
+  rawAgentId?: string;
+}) {
+  const defaultAgentId = resolveDefaultAgentId(params.cfg);
+  const explicitAgentId = resolveKnownAgentId({
+    cfg: params.cfg,
+    rawAgentId: params.rawAgentId,
+  });
+  const agentId = explicitAgentId ?? defaultAgentId;
+  const dockerHelperAgentId = resolveDockerHelperTargetAgentId();
+  const useDockerHelperOverrides = dockerHelperAgentId === agentId;
+  const agentDir = useDockerHelperOverrides
+    ? resolveOpenClawAgentDir()
+    : resolveAgentDir(params.cfg, agentId);
+  const workspaceOverride = useDockerHelperOverrides
+    ? resolveHostAuthWorkspaceOverride()
+    : undefined;
   const workspaceDir =
-    resolveAgentWorkspaceDir(config, defaultAgentId) ?? resolveDefaultAgentWorkspaceDir();
+    workspaceOverride ??
+    resolveAgentWorkspaceDir(params.cfg, agentId) ??
+    resolveDefaultAgentWorkspaceDir();
+  return { agentId, agentDir, workspaceDir };
+}
+
+async function resolveModelsAuthContext(rawAgentId?: string): Promise<ResolvedModelsAuthContext> {
+  const config = await loadValidConfigOrThrow();
+  const { agentDir, workspaceDir } = resolveAuthTargetContext({ cfg: config, rawAgentId });
   const providers = resolvePluginProviders({
     config,
     workspaceDir,
@@ -219,7 +255,7 @@ async function persistProviderAuthResult(params: {
   setDefault?: boolean;
 }) {
   for (const profile of params.result.profiles) {
-    upsertAuthProfile({
+    await upsertAuthProfileOrThrow({
       profileId: profile.profileId,
       credential: profile.credential,
       agentDir: params.agentDir,
@@ -301,14 +337,14 @@ async function runProviderAuthMethod(params: {
 }
 
 export async function modelsAuthSetupTokenCommand(
-  opts: { provider?: string; yes?: boolean },
+  opts: { provider?: string; yes?: boolean; agent?: string },
   runtime: RuntimeEnv,
 ) {
   if (!process.stdin.isTTY) {
     throw new Error("setup-token requires an interactive TTY.");
   }
 
-  const { config, agentDir, workspaceDir, providers } = await resolveModelsAuthContext();
+  const { config, agentDir, workspaceDir, providers } = await resolveModelsAuthContext(opts.agent);
   const tokenProviders = listProvidersWithTokenMethods(providers);
   if (tokenProviders.length === 0) {
     throw new Error(
@@ -357,10 +393,15 @@ export async function modelsAuthPasteTokenCommand(
     provider?: string;
     profileId?: string;
     expiresIn?: string;
+    agent?: string;
   },
   runtime: RuntimeEnv,
 ) {
-  const { agentDir } = await resolveModelsAuthContext();
+  const config = await loadValidConfigOrThrow();
+  const { agentDir } = resolveAuthTargetContext({
+    cfg: config,
+    rawAgentId: opts.agent,
+  });
   const rawProvider = opts.provider?.trim();
   if (!rawProvider) {
     throw new Error("Missing --provider.");
@@ -379,7 +420,7 @@ export async function modelsAuthPasteTokenCommand(
       ? Date.now() + parseDurationMs(String(opts.expiresIn ?? "").trim(), { defaultUnit: "d" })
       : undefined;
 
-  upsertAuthProfile({
+  await upsertAuthProfileOrThrow({
     profileId,
     credential: {
       type: "token",
@@ -396,8 +437,8 @@ export async function modelsAuthPasteTokenCommand(
   runtime.log(`Auth profile: ${profileId} (${provider}/token)`);
 }
 
-export async function modelsAuthAddCommand(_opts: Record<string, never>, runtime: RuntimeEnv) {
-  const { config, agentDir, workspaceDir, providers } = await resolveModelsAuthContext();
+export async function modelsAuthAddCommand(opts: { agent?: string }, runtime: RuntimeEnv) {
+  const { config, agentDir, workspaceDir, providers } = await resolveModelsAuthContext(opts.agent);
   const tokenProviders = listProvidersWithTokenMethods(providers);
 
   const provider = await select({
@@ -491,7 +532,10 @@ export async function modelsAuthAddCommand(_opts: Record<string, never>, runtime
       ).trim()
     : undefined;
 
-  await modelsAuthPasteTokenCommand({ provider: providerId, profileId, expiresIn }, runtime);
+  await modelsAuthPasteTokenCommand(
+    { provider: providerId, profileId, expiresIn, agent: opts.agent },
+    runtime,
+  );
 }
 
 type LoginOptions = {
@@ -499,11 +543,12 @@ type LoginOptions = {
   method?: string;
   setDefault?: boolean;
   yes?: boolean;
+  agent?: string;
 };
 
 /**
  * Clear stale cooldown/disabled state for all profiles matching a provider.
- * When a user explicitly runs `models auth login`, they intend to fix auth —
+ * When a user explicitly runs `models auth login`, they intend to fix auth -
  * stale `auth_permanent` / `billing` lockouts should not persist across
  * a deliberate re-authentication attempt.
  */
@@ -515,7 +560,7 @@ async function clearStaleProfileLockouts(provider: string, agentDir: string): Pr
       await clearAuthProfileCooldown({ store, profileId, agentDir });
     }
   } catch {
-    // Best-effort housekeeping — never block re-authentication.
+    // Best-effort housekeeping - never block re-authentication.
   }
 }
 
@@ -541,7 +586,7 @@ export async function modelsAuthLoginCommand(opts: LoginOptions, runtime: Runtim
     throw new Error("models auth login requires an interactive TTY.");
   }
 
-  const { config, agentDir, workspaceDir, providers } = await resolveModelsAuthContext();
+  const { config, agentDir, workspaceDir, providers } = await resolveModelsAuthContext(opts.agent);
   const prompter = createClackPrompter();
   const authProviders = listProvidersWithAuthMethods(providers);
   if (authProviders.length === 0) {

@@ -47,17 +47,7 @@ export function upsertAuthProfile(params: {
   credential: AuthProfileCredential;
   agentDir?: string;
 }): void {
-  const credential =
-    params.credential.type === "api_key"
-      ? {
-          ...params.credential,
-          ...(typeof params.credential.key === "string"
-            ? { key: normalizeSecretInput(params.credential.key) }
-            : {}),
-        }
-      : params.credential.type === "token"
-        ? { ...params.credential, token: normalizeSecretInput(params.credential.token) }
-        : params.credential;
+  const credential = sanitizeAuthProfileCredential(params.credential);
   const store = ensureAuthProfileStore(params.agentDir);
   store.profiles[params.profileId] = credential;
   saveAuthProfileStore(store, params.agentDir);
@@ -67,14 +57,33 @@ export async function upsertAuthProfileWithLock(params: {
   profileId: string;
   credential: AuthProfileCredential;
   agentDir?: string;
+  throwOnError?: boolean;
 }): Promise<AuthProfileStore | null> {
+  const credential = sanitizeAuthProfileCredential(params.credential);
   return await updateAuthProfileStoreWithLock({
     agentDir: params.agentDir,
+    throwOnError: params.throwOnError,
     updater: (store) => {
-      store.profiles[params.profileId] = params.credential;
+      store.profiles[params.profileId] = credential;
       return true;
     },
   });
+}
+
+function sanitizeAuthProfileCredential(credential: AuthProfileCredential): AuthProfileCredential {
+  if (credential.type === "api_key") {
+    return {
+      ...credential,
+      ...(typeof credential.key === "string" ? { key: normalizeSecretInput(credential.key) } : {}),
+    };
+  }
+  if (credential.type === "token") {
+    return {
+      ...credential,
+      token: normalizeSecretInput(credential.token),
+    };
+  }
+  return credential;
 }
 
 export function listProfilesForProvider(store: AuthProfileStore, provider: string): string[] {

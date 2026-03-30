@@ -85,6 +85,24 @@ describe("models cli", () => {
   });
 
   it.each([
+    { label: "status flag", args: ["models", "auth", "login-github-copilot", "--agent", "ops"] },
+    {
+      label: "parent flag",
+      args: ["models", "--agent", "ops", "auth", "login-github-copilot"],
+    },
+  ])("passes --agent to github copilot login ($label)", async ({ args }) => {
+    await runModelsCommand(args);
+    expect(modelsAuthLoginCommand).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "github-copilot",
+        method: "device",
+        agent: "ops",
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it.each([
     { label: "status flag", args: ["models", "status", "--agent", "poe"] },
     { label: "parent flag", args: ["models", "--agent", "poe", "status"] },
   ])("passes --agent to models status ($label)", async ({ args }) => {
