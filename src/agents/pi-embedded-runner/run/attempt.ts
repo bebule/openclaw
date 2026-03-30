@@ -886,6 +886,7 @@ export async function runEmbeddedAttempt(
       const shouldUseWebSocketTransport = shouldUseOpenAIWebSocketTransport({
         provider: params.provider,
         modelApi: params.model.api,
+        modelBaseUrl: params.model.baseUrl,
       });
       const wsApiKey = shouldUseWebSocketTransport
         ? await params.authStorage.getApiKey(params.provider)

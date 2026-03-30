@@ -7,8 +7,38 @@ describe("openai websocket transport selection", () => {
       shouldUseOpenAIWebSocketTransport({
         provider: "openai",
         modelApi: "openai-responses",
+        modelBaseUrl: "https://api.openai.com/v1",
       }),
     ).toBe(true);
+  });
+
+  it("accepts the default OpenAI responses base URL", () => {
+    expect(
+      shouldUseOpenAIWebSocketTransport({
+        provider: "openai",
+        modelApi: "openai-responses",
+      }),
+    ).toBe(true);
+  });
+
+  it("rejects Codex responses transport pairs", () => {
+    expect(
+      shouldUseOpenAIWebSocketTransport({
+        provider: "openai-codex",
+        modelApi: "openai-codex-responses",
+        modelBaseUrl: "https://chatgpt.com/backend-api",
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects proxied OpenAI responses base URLs", () => {
+    expect(
+      shouldUseOpenAIWebSocketTransport({
+        provider: "openai",
+        modelApi: "openai-responses",
+        modelBaseUrl: "https://proxy.example.com/v1",
+      }),
+    ).toBe(false);
   });
 
   it("rejects mismatched OpenAI websocket transport pairs", () => {
