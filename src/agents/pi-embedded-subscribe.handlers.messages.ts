@@ -38,6 +38,41 @@ const stripTrailingDirective = (text: string): string => {
   return text.slice(0, openIndex);
 };
 
+function normalizeAssistantPhase(value: unknown): "commentary" | "final_answer" | undefined {
+  return value === "commentary" || value === "final_answer" ? value : undefined;
+}
+
+function resolveAssistantPhase(
+  message: AgentMessage | undefined,
+): "commentary" | "final_answer" | undefined {
+  if (!message || message.role !== "assistant") {
+    return undefined;
+  }
+  const directPhase = normalizeAssistantPhase((message as { phase?: unknown }).phase);
+  if (directPhase) {
+    return directPhase;
+  }
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+  for (const part of content as Array<{ type?: unknown; textSignature?: unknown }>) {
+    if (part?.type !== "text" || typeof part.textSignature !== "string") {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(part.textSignature) as { phase?: unknown };
+      const phase = normalizeAssistantPhase(parsed.phase);
+      if (phase) {
+        return phase;
+      }
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 function isTranscriptOnlyOpenClawAssistantMessage(message: AgentMessage | undefined): boolean {
   if (!message || message.role !== "assistant") {
     return false;
@@ -45,6 +80,13 @@ function isTranscriptOnlyOpenClawAssistantMessage(message: AgentMessage | undefi
   const provider = typeof message.provider === "string" ? message.provider.trim() : "";
   const model = typeof message.model === "string" ? message.model.trim() : "";
   return provider === "openclaw" && (model === "delivery-mirror" || model === "gateway-injected");
+}
+
+function shouldIgnoreAssistantReplyMessage(message: AgentMessage | undefined): boolean {
+  return (
+    isTranscriptOnlyOpenClawAssistantMessage(message) ||
+    resolveAssistantPhase(message) === "commentary"
+  );
 }
 
 function emitReasoningEnd(ctx: EmbeddedPiSubscribeContext) {
@@ -143,7 +185,7 @@ export function handleMessageStart(
   evt: AgentEvent & { message: AgentMessage },
 ) {
   const msg = evt.message;
-  if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
+  if (msg?.role !== "assistant" || shouldIgnoreAssistantReplyMessage(msg)) {
     return;
   }
 
@@ -162,7 +204,7 @@ export function handleMessageUpdate(
   evt: AgentEvent & { message: AgentMessage; assistantMessageEvent?: unknown },
 ) {
   const msg = evt.message;
-  if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
+  if (msg?.role !== "assistant" || shouldIgnoreAssistantReplyMessage(msg)) {
     return;
   }
 
@@ -345,7 +387,7 @@ export function handleMessageEnd(
   evt: AgentEvent & { message: AgentMessage },
 ) {
   const msg = evt.message;
-  if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
+  if (msg?.role !== "assistant" || shouldIgnoreAssistantReplyMessage(msg)) {
     return;
   }
 
@@ -430,11 +472,16 @@ export function handleMessageEnd(
     if (!onBlockReply) {
       return;
     }
-    void Promise.resolve()
-      .then(() => onBlockReply(payload))
-      .catch((err) => {
-        ctx.log.warn(`block reply callback failed: ${String(err)}`);
-      });
+    try {
+      const result = onBlockReply(payload);
+      if (result && typeof result === "object" && "then" in result) {
+        void Promise.resolve(result).catch((err) => {
+          ctx.log.warn(`block reply callback failed: ${String(err)}`);
+        });
+      }
+    } catch (err) {
+      ctx.log.warn(`block reply callback failed: ${String(err)}`);
+    }
   };
   const shouldEmitReasoning = Boolean(
     !ctx.params.silentExpected &&

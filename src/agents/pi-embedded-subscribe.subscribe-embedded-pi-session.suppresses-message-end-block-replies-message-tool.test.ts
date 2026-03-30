@@ -117,6 +117,39 @@ describe("subscribeEmbeddedPiSession", () => {
     expect(onBlockReply).not.toHaveBeenCalled();
   });
 
+  it("ignores commentary-phase message_end block replies", async () => {
+    const { emit, onBlockReply } = createBlockReplyHarness("message_end");
+
+    emitAssistantMessageEnd(emit, "Draft commentary", { phase: "commentary" });
+    await Promise.resolve();
+
+    expect(onBlockReply).not.toHaveBeenCalled();
+  });
+
+  it("ignores commentary-phase text_end block replies", async () => {
+    const { emit, onBlockReply } = createBlockReplyHarness("text_end");
+
+    const commentaryMessage = {
+      role: "assistant",
+      phase: "commentary",
+    } as AssistantMessage;
+    emit({ type: "message_start", message: commentaryMessage });
+    emit({
+      type: "message_update",
+      message: commentaryMessage,
+      assistantMessageEvent: { type: "text_delta", delta: "Draft commentary" },
+    });
+    emit({
+      type: "message_update",
+      message: commentaryMessage,
+      assistantMessageEvent: { type: "text_end", content: "Draft commentary" },
+    });
+    emitAssistantMessageEnd(emit, "Draft commentary", { phase: "commentary" });
+    await Promise.resolve();
+
+    expect(onBlockReply).not.toHaveBeenCalled();
+  });
+
   it("clears block reply state on message_start", async () => {
     const { emit, onBlockReply } = createBlockReplyHarness("text_end");
     emitAssistantTextEndBlock(emit, "OK");
