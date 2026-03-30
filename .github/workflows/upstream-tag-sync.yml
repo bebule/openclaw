@@ -1,0 +1,257 @@
+name: Upstream Tag Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Optional upstream tag to sync. Leave empty to auto-select the latest merged upstream tag.
+        required: false
+        type: string
+      branch_key:
+        description: Optional branch key used in sync/<branch_key>-v<tag>.
+        required: false
+        type: string
+      source_ref:
+        description: Optional source ref to replay commits from.
+        required: false
+        type: string
+      tag_pattern:
+        description: Tag glob used when auto-selecting the latest upstream tag.
+        required: false
+        default: v*
+        type: string
+      verification:
+        description: Verification gate before pushing the new sync branch.
+        required: true
+        default: check
+        type: choice
+        options:
+          - none
+          - check
+          - check-and-build
+      pr_base:
+        description: Base branch for the sync pull request.
+        required: false
+        type: string
+      pr_mode:
+        description: Whether the sync pull request should open as draft or ready.
+        required: true
+        default: draft
+        type: choice
+        options:
+          - draft
+          - ready
+  schedule:
+    - cron: "23 */6 * * *"
+
+concurrency:
+  group: upstream-tag-sync-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  NODE_VERSION: "24.x"
+  PNPM_VERSION: "10.23.0"
+
+jobs:
+  sync_upstream_tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      # Optional repository variables for scheduled runs:
+      # - UPSTREAM_SYNC_BRANCH_KEY
+      # - UPSTREAM_SYNC_SOURCE_REF
+      # - UPSTREAM_SYNC_TAG_PATTERN
+      # - UPSTREAM_SYNC_VERIFICATION
+      # - UPSTREAM_SYNC_PR_BASE
+      # - UPSTREAM_SYNC_PR_MODE
+      BRANCH_KEY: ${{ inputs.branch_key || vars.UPSTREAM_SYNC_BRANCH_KEY || github.repository_owner }}
+      PR_BASE: ${{ inputs.pr_base || vars.UPSTREAM_SYNC_PR_BASE || 'main' }}
+      PR_MODE: ${{ inputs.pr_mode || vars.UPSTREAM_SYNC_PR_MODE || 'draft' }}
+      SOURCE_REF: ${{ inputs.source_ref || vars.UPSTREAM_SYNC_SOURCE_REF || '' }}
+      TAG: ${{ inputs.tag || '' }}
+      TAG_PATTERN: ${{ inputs.tag_pattern || vars.UPSTREAM_SYNC_TAG_PATTERN || 'v*' }}
+      VERIFICATION: ${{ inputs.verification || vars.UPSTREAM_SYNC_VERIFICATION || 'check' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node environment
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+          install-bun: "false"
+          use-sticky-disk: "false"
+          install-deps: ${{ env.VERIFICATION == 'none' && 'false' || 'true' }}
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Prepare sync branch
+        id: sync
+        env:
+          FALLBACK_SOURCE_REF: ${{ env.SOURCE_REF != '' && env.SOURCE_REF || format('refs/remotes/origin/{0}', env.BRANCH_KEY) }}
+          RUNNER_TEMP_JSON: ${{ runner.temp }}/upstream-tag-sync.json
+        run: |
+          set -euo pipefail
+          args=(
+            --branch-key "${BRANCH_KEY}"
+            --fallback-source-ref "${FALLBACK_SOURCE_REF}"
+            --tag-pattern "${TAG_PATTERN}"
+          )
+          if [[ -n "${TAG}" ]]; then
+            args+=(--target-tag "${TAG}")
+          fi
+          node scripts/upstream-tag-sync.mjs "${args[@]}" > "${RUNNER_TEMP_JSON}"
+          cat "${RUNNER_TEMP_JSON}"
+
+          status="$(jq -r '.status' "${RUNNER_TEMP_JSON}")"
+          target_branch="$(jq -r '.targetBranch' "${RUNNER_TEMP_JSON}")"
+          target_tag="$(jq -r '.targetTag' "${RUNNER_TEMP_JSON}")"
+          source_ref="$(jq -r '.sourceRef // ""' "${RUNNER_TEMP_JSON}")"
+          commit_count="$(jq -r '.commits | length' "${RUNNER_TEMP_JSON}")"
+
+          {
+            echo "status=${status}"
+            echo "target_branch=${target_branch}"
+            echo "target_tag=${target_tag}"
+            echo "source_ref=${source_ref}"
+            echo "commit_count=${commit_count}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Verify sync branch
+        if: steps.sync.outputs.status == 'created' && env.VERIFICATION != 'none'
+        run: |
+          set -euo pipefail
+          pnpm check
+          if [[ "${VERIFICATION}" == "check-and-build" ]]; then
+            pnpm build
+          fi
+
+      - name: Push sync branch
+        if: steps.sync.outputs.status == 'created'
+        run: |
+          set -euo pipefail
+          git push origin "HEAD:refs/heads/${{ steps.sync.outputs.target_branch }}"
+
+      - name: Ensure sync pull request
+        id: pr
+        if: steps.sync.outputs.status == 'created' || steps.sync.outputs.status == 'noop_existing_branch'
+        uses: actions/github-script@v8
+        env:
+          PR_BASE: ${{ env.PR_BASE }}
+          PR_MODE: ${{ env.PR_MODE }}
+          SYNC_BRANCH: ${{ steps.sync.outputs.target_branch }}
+          SYNC_COMMIT_COUNT: ${{ steps.sync.outputs.commit_count }}
+          SYNC_JSON_PATH: ${{ runner.temp }}/upstream-tag-sync.json
+          SYNC_SOURCE_REF: ${{ steps.sync.outputs.source_ref }}
+          SYNC_STATUS: ${{ steps.sync.outputs.status }}
+          SYNC_TARGET_TAG: ${{ steps.sync.outputs.target_tag }}
+        with:
+          script: |
+            const fs = require("node:fs");
+
+            const owner = context.repo.owner;
+            const branchKey = process.env.BRANCH_KEY || owner;
+            const repo = context.repo.repo;
+            const base = process.env.PR_BASE;
+            const headBranch = process.env.SYNC_BRANCH;
+            const head = `${owner}:${headBranch}`;
+
+            if (!headBranch) {
+              core.setOutput("status", "skipped_missing_branch");
+              return;
+            }
+
+            const openPulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "open",
+              head,
+              base,
+              per_page: 100,
+            });
+            if (openPulls.length > 0) {
+              core.setOutput("status", "existing_open");
+              core.setOutput("url", openPulls[0].html_url);
+              core.setOutput("number", String(openPulls[0].number));
+              return;
+            }
+
+            const closedPulls = await github.paginate(github.rest.pulls.list, {
+              owner,
+              repo,
+              state: "closed",
+              head,
+              base,
+              per_page: 100,
+            });
+            if (closedPulls.length > 0) {
+              core.setOutput("status", "existing_closed");
+              core.setOutput("url", closedPulls[0].html_url);
+              core.setOutput("number", String(closedPulls[0].number));
+              return;
+            }
+
+            const syncData = JSON.parse(fs.readFileSync(process.env.SYNC_JSON_PATH, "utf8"));
+            const commitLines = (syncData.commits ?? [])
+              .slice(0, 20)
+              .map((commit) => `- ${commit.sha.slice(0, 12)} ${commit.subject}`);
+            if ((syncData.commits ?? []).length > 20) {
+              commitLines.push(`- ... and ${(syncData.commits ?? []).length - 20} more`);
+            }
+
+            const title = `sync: reapply ${branchKey} commits on ${process.env.SYNC_TARGET_TAG}`;
+            const bodyLines = [
+              "## Summary",
+              "",
+              `- branch key: \`${branchKey}\``,
+              `- upstream tag: \`${process.env.SYNC_TARGET_TAG}\``,
+              `- target branch: \`${headBranch}\``,
+              `- base branch: \`${base}\``,
+              `- source ref: \`${process.env.SYNC_SOURCE_REF || "n/a"}\``,
+              `- sync status: \`${process.env.SYNC_STATUS}\``,
+              `- replayed commits: ${process.env.SYNC_COMMIT_COUNT || "0"}`,
+              `- verification: \`${process.env.VERIFICATION || "check"}\``,
+              "",
+              "## Replayed commits",
+              "",
+              ...(commitLines.length > 0 ? commitLines : ["- No replayed commits recorded in the sync payload."]),
+            ];
+
+            const created = await github.rest.pulls.create({
+              owner,
+              repo,
+              title,
+              head: headBranch,
+              base,
+              body: bodyLines.join("\n"),
+              draft: process.env.PR_MODE !== "ready",
+            });
+
+            core.setOutput("status", "created");
+            core.setOutput("url", created.data.html_url);
+            core.setOutput("number", String(created.data.number));
+
+      - name: Write job summary
+        if: always()
+        run: |
+          {
+            echo "## Upstream tag sync"
+            echo ""
+            echo "- status: ${{ steps.sync.outputs.status || 'not-run' }}"
+            echo "- target tag: ${{ steps.sync.outputs.target_tag || 'n/a' }}"
+            echo "- target branch: ${{ steps.sync.outputs.target_branch || 'n/a' }}"
+            echo "- source ref: ${{ steps.sync.outputs.source_ref || 'n/a' }}"
+            echo "- replayed commits: ${{ steps.sync.outputs.commit_count || '0' }}"
+            echo "- verification: ${VERIFICATION}"
+            echo "- pull request: ${{ steps.pr.outputs.url || 'n/a' }}"
+            echo "- pull request status: ${{ steps.pr.outputs.status || 'not-run' }}"
+          } >> "$GITHUB_STEP_SUMMARY"
