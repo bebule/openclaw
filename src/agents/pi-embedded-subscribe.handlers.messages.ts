@@ -387,7 +387,7 @@ export function handleMessageEnd(
   evt: AgentEvent & { message: AgentMessage },
 ) {
   const msg = evt.message;
-  if (msg?.role !== "assistant" || shouldIgnoreAssistantReplyMessage(msg)) {
+  if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
     return;
   }
 
@@ -395,6 +395,9 @@ export function handleMessageEnd(
   ctx.noteLastAssistant(assistantMessage);
   ctx.recordAssistantUsage((assistantMessage as { usage?: unknown }).usage);
   if (ctx.state.deterministicApprovalPromptSent) {
+    return;
+  }
+  if (resolveAssistantPhase(assistantMessage) === "commentary") {
     return;
   }
   promoteThinkingTagsToBlocks(assistantMessage);
