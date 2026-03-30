@@ -12,7 +12,7 @@ function runGit(args, options = {}) {
     stdio: ["ignore", "pipe", "pipe"],
     ...options,
   });
-  return stdout.trim();
+  return typeof stdout === "string" ? stdout.trim() : "";
 }
 
 function runGitAllowFailure(args, options = {}) {
@@ -31,9 +31,8 @@ function runGitAllowFailure(args, options = {}) {
 
 function parseArgs(argv) {
   const options = {
-    branchKey: "",
+    baseBranch: "main",
     dryRun: false,
-    fallbackSourceRef: "",
     originRemote: "origin",
     push: false,
     syncPrefix: "sync",
@@ -46,14 +45,11 @@ function parseArgs(argv) {
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     switch (arg) {
-      case "--branch-key":
-        options.branchKey = argv[++index] ?? "";
+      case "--base-branch":
+        options.baseBranch = argv[++index] ?? "";
         break;
       case "--dry-run":
         options.dryRun = true;
-        break;
-      case "--fallback-source-ref":
-        options.fallbackSourceRef = argv[++index] ?? "";
         break;
       case "--origin-remote":
         options.originRemote = argv[++index] ?? "";
@@ -81,8 +77,8 @@ function parseArgs(argv) {
     }
   }
 
-  if (!options.branchKey) {
-    fail("Missing required --branch-key");
+  if (!options.baseBranch) {
+    fail("Missing required --base-branch");
   }
   if (!options.originRemote) {
     fail("Missing --origin-remote");
@@ -98,9 +94,6 @@ function parseArgs(argv) {
   }
   if (!options.upstreamMainRef) {
     options.upstreamMainRef = `refs/remotes/${options.upstreamRemote}/main`;
-  }
-  if (!options.fallbackSourceRef) {
-    options.fallbackSourceRef = `refs/remotes/${options.originRemote}/${options.branchKey}`;
   }
 
   return options;
@@ -208,6 +201,13 @@ function sortVersionsDescending(values) {
   return [...values].toSorted((left, right) => compareOpenClawVersions(right, left));
 }
 
+function splitLines(stdout) {
+  return stdout
+    .split("\n")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 function fetchOriginRemote(remote) {
   log(`Fetching ${remote} branches`);
   runGit(["fetch", "--prune", remote, `+refs/heads/*:refs/remotes/${remote}/*`]);
@@ -238,16 +238,15 @@ function resolveTargetTag(options) {
     };
   }
 
-  const tags = runGit([
-    "for-each-ref",
-    "--merged",
-    options.upstreamMainRef,
-    "--format=%(refname:strip=3)",
-    tagNamespacePattern,
-  ])
-    .split("\n")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+  const tags = splitLines(
+    runGit([
+      "for-each-ref",
+      "--merged",
+      options.upstreamMainRef,
+      "--format=%(refname:strip=3)",
+      tagNamespacePattern,
+    ]),
+  );
 
   if (tags.length === 0) {
     fail(`No tags matching '${options.tagPattern}' are merged into ${options.upstreamMainRef}`);
@@ -269,79 +268,99 @@ function refExists(ref) {
   return runGitAllowFailure(["rev-parse", "--verify", "--quiet", ref]).ok;
 }
 
-function resolveLatestSyncSourceRef(options) {
-  const pattern = `refs/remotes/${options.originRemote}/${options.syncPrefix}/${options.branchKey}-v*`;
-  const refs = runGit(["for-each-ref", "--format=%(refname)", pattern])
-    .split("\n")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  const prefix = `refs/remotes/${options.originRemote}/${options.syncPrefix}/${options.branchKey}-`;
-  const latestRef = [...refs].toSorted((left, right) => {
-    const leftVersion = left.startsWith(prefix) ? left.slice(prefix.length) : left;
-    const rightVersion = right.startsWith(prefix) ? right.slice(prefix.length) : right;
-    return compareOpenClawVersions(rightVersion, leftVersion);
-  })[0];
-
-  if (latestRef) {
-    log(`Using latest sync source ref ${latestRef}`);
-    return latestRef;
+function resolveBaseRef(options) {
+  const baseRef = `refs/remotes/${options.originRemote}/${options.baseBranch}`;
+  if (!refExists(baseRef)) {
+    fail(`Base branch ${options.baseBranch} was not found at ${baseRef}`);
   }
-
-  if (refExists(options.fallbackSourceRef)) {
-    log(`Using fallback source ref ${options.fallbackSourceRef}`);
-    return options.fallbackSourceRef;
-  }
-
-  fail(
-    `Unable to resolve source ref. No existing sync branch matched ${pattern} and fallback ref ${options.fallbackSourceRef} was missing.`,
-  );
+  return baseRef;
 }
 
-function collectReplayCommits(targetTagRef, sourceRef) {
+function resolveTargetBranch(options, targetTag) {
+  return `${options.syncPrefix}/${targetTag}`;
+}
+
+function isAncestor(leftRef, rightRef) {
+  return runGitAllowFailure(["merge-base", "--is-ancestor", leftRef, rightRef], {
+    stdio: ["ignore", "ignore", "ignore"],
+  }).ok;
+}
+
+function collectLocalCommitSummary(targetTagRef, baseRef, limit = 50) {
   const revList = runGit([
     "rev-list",
     "--reverse",
     "--right-only",
     "--cherry-pick",
-    `${targetTagRef}...${sourceRef}`,
+    `${targetTagRef}...${baseRef}`,
   ]);
-  const shas = revList
-    .split("\n")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
-
-  const commits = [];
-  for (const sha of shas) {
+  const shas = splitLines(revList);
+  const commits = shas.slice(0, limit).map((sha) => {
     const parentLine = runGit(["rev-list", "--parents", "-n", "1", sha]);
     const parentCount = parentLine.split(" ").length - 1;
-    if (parentCount > 1) {
-      fail(`Commit ${sha} is a merge commit. This sync flow only supports linear commit stacks.`);
-    }
     const subject = runGit(["show", "-s", "--format=%s", sha]);
-    commits.push({ sha, subject });
-  }
-  return commits;
+    return {
+      sha,
+      subject,
+      isMerge: parentCount > 1,
+    };
+  });
+  return {
+    count: shas.length,
+    commits,
+  };
 }
 
-function extractSyncSourceTag(sourceRef, options) {
-  const prefix = `refs/remotes/${options.originRemote}/${options.syncPrefix}/${options.branchKey}-`;
-  if (!sourceRef.startsWith(prefix)) {
-    return null;
-  }
-  return sourceRef.slice(prefix.length);
-}
-
-function checkoutTargetBranch(targetTagRef, targetBranch) {
-  runGit(["switch", "--detach", targetTagRef]);
+function checkoutTargetBranch(baseRef, targetBranch) {
+  runGit(["switch", "--detach", baseRef]);
   runGit(["switch", "-C", targetBranch]);
 }
 
-function cherryPickCommits(commits) {
-  for (const commit of commits) {
-    log(`Cherry-picking ${commit.sha} ${commit.subject}`);
-    runGit(["cherry-pick", "-x", commit.sha], { stdio: ["ignore", "inherit", "inherit"] });
+function mergeTargetTag(targetTagRef) {
+  return runGitAllowFailure(["merge", "--no-ff", "--no-edit", targetTagRef], {
+    stdio: ["ignore", "inherit", "inherit"],
+  }).ok;
+}
+
+function collectFileLocalCommitSummary(targetTagRef, baseRef, path, limit = 5) {
+  const logOutput = runGitAllowFailure([
+    "log",
+    "--format=%H%x09%s",
+    `${targetTagRef}..${baseRef}`,
+    "--",
+    path,
+  ]);
+  if (!logOutput.ok || !logOutput.stdout) {
+    return {
+      count: 0,
+      commits: [],
+    };
   }
+
+  const allCommits = splitLines(logOutput.stdout).map((line) => {
+    const [sha, subject = ""] = line.split("\t");
+    return { sha, subject };
+  });
+  return {
+    count: allCommits.length,
+    commits: allCommits.slice(0, limit),
+  };
+}
+
+function collectConflictFiles(targetTagRef, baseRef) {
+  const conflictOutput = runGitAllowFailure(["diff", "--name-only", "--diff-filter=U"]);
+  if (!conflictOutput.ok || !conflictOutput.stdout) {
+    return [];
+  }
+
+  return splitLines(conflictOutput.stdout).map((path) => {
+    const localCommitSummary = collectFileLocalCommitSummary(targetTagRef, baseRef, path);
+    return {
+      path,
+      localCommitCount: localCommitSummary.count,
+      localCommits: localCommitSummary.commits,
+    };
+  });
 }
 
 function pushBranch(originRemote, targetBranch) {
@@ -351,76 +370,91 @@ function pushBranch(originRemote, targetBranch) {
   });
 }
 
+function printResult(result) {
+  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+}
+
 function main() {
   const options = parseArgs(process.argv.slice(2));
   fetchOriginRemote(options.originRemote);
   fetchUpstreamRemote(options.upstreamRemote);
 
   const { tag: targetTag, tagRef: targetTagRef } = resolveTargetTag(options);
-  const targetBranch = `${options.syncPrefix}/${options.branchKey}-${targetTag}`;
+  const baseRef = resolveBaseRef(options);
+  const targetBranch = resolveTargetBranch(options, targetTag);
+  const localCommitSummary = collectLocalCommitSummary(targetTagRef, baseRef);
+
   if (remoteBranchExists(options.originRemote, targetBranch)) {
-    const result = {
+    printResult({
       status: "noop_existing_branch",
-      sourceRef: null,
+      baseRef,
       targetBranch,
       targetTag,
-      commits: [],
+      localCommitCount: localCommitSummary.count,
+      localCommits: localCommitSummary.commits,
+      conflictFiles: [],
       pushed: false,
-    };
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    });
     return;
   }
 
-  const sourceRef = resolveLatestSyncSourceRef(options);
-  const sourceTag = extractSyncSourceTag(sourceRef, options);
-  if (sourceTag && compareOpenClawVersions(targetTag, sourceTag) < 0) {
-    fail(
-      `Target tag ${targetTag} is older than source sync branch ${sourceTag}. Syncing older tags from a newer sync branch is not supported.`,
-    );
-  }
-  const commits = collectReplayCommits(targetTagRef, sourceRef);
-  if (commits.length === 0) {
-    const result = {
-      status: "noop_no_commits",
-      sourceRef,
+  if (isAncestor(targetTagRef, baseRef)) {
+    printResult({
+      status: "noop_up_to_date",
+      baseRef,
       targetBranch,
       targetTag,
-      commits,
+      localCommitCount: localCommitSummary.count,
+      localCommits: localCommitSummary.commits,
+      conflictFiles: [],
       pushed: false,
-    };
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    });
     return;
   }
 
   if (options.dryRun) {
-    const result = {
+    printResult({
       status: "dry_run",
-      sourceRef,
+      baseRef,
       targetBranch,
       targetTag,
-      commits,
+      localCommitCount: localCommitSummary.count,
+      localCommits: localCommitSummary.commits,
+      conflictFiles: [],
       pushed: false,
-    };
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    });
     return;
   }
 
-  checkoutTargetBranch(targetTagRef, targetBranch);
-  cherryPickCommits(commits);
+  checkoutTargetBranch(baseRef, targetBranch);
+  if (!mergeTargetTag(targetTagRef)) {
+    printResult({
+      status: "merge_conflict",
+      baseRef,
+      targetBranch,
+      targetTag,
+      localCommitCount: localCommitSummary.count,
+      localCommits: localCommitSummary.commits,
+      conflictFiles: collectConflictFiles(targetTagRef, baseRef),
+      pushed: false,
+    });
+    return;
+  }
 
   if (options.push) {
     pushBranch(options.originRemote, targetBranch);
   }
 
-  const result = {
+  printResult({
     status: "created",
-    sourceRef,
+    baseRef,
     targetBranch,
     targetTag,
-    commits,
+    localCommitCount: localCommitSummary.count,
+    localCommits: localCommitSummary.commits,
+    conflictFiles: [],
     pushed: options.push,
-  };
-  process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  });
 }
 
 try {

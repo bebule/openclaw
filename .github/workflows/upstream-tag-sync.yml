@@ -7,13 +7,10 @@ on:
         description: Optional upstream tag to sync. Leave empty to auto-select the latest merged upstream tag.
         required: false
         type: string
-      branch_key:
-        description: Optional branch key used in sync/<branch_key>-v<tag>.
+      base_branch:
+        description: Base branch to prepare the sync pull request against.
         required: false
-        type: string
-      source_ref:
-        description: Optional source ref to replay commits from.
-        required: false
+        default: main
         type: string
       tag_pattern:
         description: Tag glob used when auto-selecting the latest upstream tag.
@@ -29,10 +26,6 @@ on:
           - none
           - check
           - check-and-build
-      pr_base:
-        description: Base branch for the sync pull request.
-        required: false
-        type: string
       pr_mode:
         description: Whether the sync pull request should open as draft or ready.
         required: true
@@ -61,16 +54,12 @@ jobs:
       pull-requests: write
     env:
       # Optional repository variables for scheduled runs:
-      # - UPSTREAM_SYNC_BRANCH_KEY
-      # - UPSTREAM_SYNC_SOURCE_REF
+      # - UPSTREAM_SYNC_BASE_BRANCH
       # - UPSTREAM_SYNC_TAG_PATTERN
       # - UPSTREAM_SYNC_VERIFICATION
-      # - UPSTREAM_SYNC_PR_BASE
       # - UPSTREAM_SYNC_PR_MODE
-      BRANCH_KEY: ${{ inputs.branch_key || vars.UPSTREAM_SYNC_BRANCH_KEY || github.repository_owner }}
-      PR_BASE: ${{ inputs.pr_base || vars.UPSTREAM_SYNC_PR_BASE || 'main' }}
+      BASE_BRANCH: ${{ inputs.base_branch || vars.UPSTREAM_SYNC_BASE_BRANCH || 'main' }}
       PR_MODE: ${{ inputs.pr_mode || vars.UPSTREAM_SYNC_PR_MODE || 'draft' }}
-      SOURCE_REF: ${{ inputs.source_ref || vars.UPSTREAM_SYNC_SOURCE_REF || '' }}
       TAG: ${{ inputs.tag || '' }}
       TAG_PATTERN: ${{ inputs.tag_pattern || vars.UPSTREAM_SYNC_TAG_PATTERN || 'v*' }}
       VERIFICATION: ${{ inputs.verification || vars.UPSTREAM_SYNC_VERIFICATION || 'check' }}
@@ -97,13 +86,11 @@ jobs:
       - name: Prepare sync branch
         id: sync
         env:
-          FALLBACK_SOURCE_REF: ${{ env.SOURCE_REF != '' && env.SOURCE_REF || format('refs/remotes/origin/{0}', env.BRANCH_KEY) }}
           RUNNER_TEMP_JSON: ${{ runner.temp }}/upstream-tag-sync.json
         run: |
           set -euo pipefail
           args=(
-            --branch-key "${BRANCH_KEY}"
-            --fallback-source-ref "${FALLBACK_SOURCE_REF}"
+            --base-branch "${BASE_BRANCH}"
             --tag-pattern "${TAG_PATTERN}"
           )
           if [[ -n "${TAG}" ]]; then
@@ -115,16 +102,29 @@ jobs:
           status="$(jq -r '.status' "${RUNNER_TEMP_JSON}")"
           target_branch="$(jq -r '.targetBranch' "${RUNNER_TEMP_JSON}")"
           target_tag="$(jq -r '.targetTag' "${RUNNER_TEMP_JSON}")"
-          source_ref="$(jq -r '.sourceRef // ""' "${RUNNER_TEMP_JSON}")"
-          commit_count="$(jq -r '.commits | length' "${RUNNER_TEMP_JSON}")"
+          base_ref="$(jq -r '.baseRef // ""' "${RUNNER_TEMP_JSON}")"
+          local_commit_count="$(jq -r '.localCommitCount // 0' "${RUNNER_TEMP_JSON}")"
+          conflict_count="$(jq -r '.conflictFiles | length' "${RUNNER_TEMP_JSON}")"
 
           {
             echo "status=${status}"
             echo "target_branch=${target_branch}"
             echo "target_tag=${target_tag}"
-            echo "source_ref=${source_ref}"
-            echo "commit_count=${commit_count}"
+            echo "base_ref=${base_ref}"
+            echo "local_commit_count=${local_commit_count}"
+            echo "conflict_count=${conflict_count}"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Summarize merge conflicts
+        if: steps.sync.outputs.status == 'merge_conflict'
+        env:
+          RUNNER_TEMP_JSON: ${{ runner.temp }}/upstream-tag-sync.json
+        run: |
+          {
+            echo "## Merge conflicts"
+            echo ""
+            jq -r '.conflictFiles[] | "- \(.path) (\(.localCommitCount) local commit(s) touch this path above the upstream tag)"' "${RUNNER_TEMP_JSON}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify sync branch
         if: steps.sync.outputs.status == 'created' && env.VERIFICATION != 'none'
@@ -146,12 +146,12 @@ jobs:
         if: steps.sync.outputs.status == 'created' || steps.sync.outputs.status == 'noop_existing_branch'
         uses: actions/github-script@v8
         env:
-          PR_BASE: ${{ env.PR_BASE }}
+          PR_BASE: ${{ env.BASE_BRANCH }}
           PR_MODE: ${{ env.PR_MODE }}
+          SYNC_BASE_REF: ${{ steps.sync.outputs.base_ref }}
           SYNC_BRANCH: ${{ steps.sync.outputs.target_branch }}
-          SYNC_COMMIT_COUNT: ${{ steps.sync.outputs.commit_count }}
           SYNC_JSON_PATH: ${{ runner.temp }}/upstream-tag-sync.json
-          SYNC_SOURCE_REF: ${{ steps.sync.outputs.source_ref }}
+          SYNC_LOCAL_COMMIT_COUNT: ${{ steps.sync.outputs.local_commit_count }}
           SYNC_STATUS: ${{ steps.sync.outputs.status }}
           SYNC_TARGET_TAG: ${{ steps.sync.outputs.target_tag }}
         with:
@@ -159,7 +159,6 @@ jobs:
             const fs = require("node:fs");
 
             const owner = context.repo.owner;
-            const branchKey = process.env.BRANCH_KEY || owner;
             const repo = context.repo.repo;
             const base = process.env.PR_BASE;
             const headBranch = process.env.SYNC_BRANCH;
@@ -201,29 +200,35 @@ jobs:
             }
 
             const syncData = JSON.parse(fs.readFileSync(process.env.SYNC_JSON_PATH, "utf8"));
-            const commitLines = (syncData.commits ?? [])
+            const localCommitLines = (syncData.localCommits ?? [])
               .slice(0, 20)
-              .map((commit) => `- ${commit.sha.slice(0, 12)} ${commit.subject}`);
-            if ((syncData.commits ?? []).length > 20) {
-              commitLines.push(`- ... and ${(syncData.commits ?? []).length - 20} more`);
+              .map((commit) => {
+                const mergeSuffix = commit.isMerge ? " [merge]" : "";
+                return `- ${commit.sha.slice(0, 12)} ${commit.subject}${mergeSuffix}`;
+              });
+            if ((syncData.localCommitCount ?? 0) > localCommitLines.length) {
+              localCommitLines.push(
+                `- ... and ${(syncData.localCommitCount ?? 0) - localCommitLines.length} more`,
+              );
             }
 
-            const title = `sync: reapply ${branchKey} commits on ${process.env.SYNC_TARGET_TAG}`;
+            const title = `sync: merge ${process.env.SYNC_TARGET_TAG} into ${base}`;
             const bodyLines = [
               "## Summary",
               "",
-              `- branch key: \`${branchKey}\``,
               `- upstream tag: \`${process.env.SYNC_TARGET_TAG}\``,
-              `- target branch: \`${headBranch}\``,
               `- base branch: \`${base}\``,
-              `- source ref: \`${process.env.SYNC_SOURCE_REF || "n/a"}\``,
+              `- sync branch: \`${headBranch}\``,
+              `- base ref: \`${process.env.SYNC_BASE_REF || "n/a"}\``,
               `- sync status: \`${process.env.SYNC_STATUS}\``,
-              `- replayed commits: ${process.env.SYNC_COMMIT_COUNT || "0"}`,
+              `- carried local commits: ${process.env.SYNC_LOCAL_COMMIT_COUNT || "0"}`,
               `- verification: \`${process.env.VERIFICATION || "check"}\``,
               "",
-              "## Replayed commits",
+              "## Local commits carried forward",
               "",
-              ...(commitLines.length > 0 ? commitLines : ["- No replayed commits recorded in the sync payload."]),
+              ...(localCommitLines.length > 0
+                ? localCommitLines
+                : ["- No local-only commits were detected above the upstream tag."]),
             ];
 
             const created = await github.rest.pulls.create({
@@ -247,10 +252,12 @@ jobs:
             echo "## Upstream tag sync"
             echo ""
             echo "- status: ${{ steps.sync.outputs.status || 'not-run' }}"
+            echo "- base branch: ${BASE_BRANCH}"
             echo "- target tag: ${{ steps.sync.outputs.target_tag || 'n/a' }}"
             echo "- target branch: ${{ steps.sync.outputs.target_branch || 'n/a' }}"
-            echo "- source ref: ${{ steps.sync.outputs.source_ref || 'n/a' }}"
-            echo "- replayed commits: ${{ steps.sync.outputs.commit_count || '0' }}"
+            echo "- base ref: ${{ steps.sync.outputs.base_ref || 'n/a' }}"
+            echo "- carried local commits: ${{ steps.sync.outputs.local_commit_count || '0' }}"
+            echo "- merge conflicts: ${{ steps.sync.outputs.conflict_count || '0' }}"
             echo "- verification: ${VERIFICATION}"
             echo "- pull request: ${{ steps.pr.outputs.url || 'n/a' }}"
             echo "- pull request status: ${{ steps.pr.outputs.status || 'not-run' }}"
