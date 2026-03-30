@@ -21,6 +21,16 @@ describe("openai websocket transport selection", () => {
     ).toBe(true);
   });
 
+  it("rejects blank OpenAI responses base URLs", () => {
+    expect(
+      shouldUseOpenAIWebSocketTransport({
+        provider: "openai",
+        modelApi: "openai-responses",
+        modelBaseUrl: "",
+      }),
+    ).toBe(false);
+  });
+
   it("rejects Codex responses transport pairs", () => {
     expect(
       shouldUseOpenAIWebSocketTransport({

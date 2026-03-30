@@ -32,9 +32,12 @@ export function resolveAttemptSpawnWorkspaceDir(params: {
 }
 
 function isOpenAIPublicResponsesBaseUrl(baseUrl?: string | null): boolean {
-  const trimmed = baseUrl?.trim();
-  if (!trimmed) {
+  if (baseUrl == null) {
     return true;
+  }
+  const trimmed = baseUrl.trim();
+  if (!trimmed) {
+    return false;
   }
   return /^https?:\/\/api\.openai\.com(?:\/v1)?\/?$/i.test(trimmed);
 }
