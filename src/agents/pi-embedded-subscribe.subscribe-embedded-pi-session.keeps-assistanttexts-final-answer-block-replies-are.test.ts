@@ -74,6 +74,33 @@ describe("subscribeEmbeddedPiSession", () => {
 
     expect(subscription.assistantTexts).toEqual(["Final answer"]);
   });
+
+  it("records commentary turn usage without keeping commentary text", () => {
+    const { session, emit } = createStubSessionHarness();
+
+    const subscription = subscribeEmbeddedPiSession({
+      session,
+      runId: "run",
+      reasoningMode: "on",
+    });
+
+    emit({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        phase: "commentary",
+        content: [{ type: "text", text: "Draft commentary" }],
+        usage: { input: 11, output: 7, total: 18 },
+      } as AssistantMessage,
+    });
+
+    expect(subscription.assistantTexts).toEqual([]);
+    expect(subscription.getUsageTotals()).toEqual({
+      input: 11,
+      output: 7,
+      total: 18,
+    });
+  });
   it("suppresses partial replies when reasoning is enabled and block replies are disabled", () => {
     const { session, emit } = createStubSessionHarness();
 
