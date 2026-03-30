@@ -31,14 +31,24 @@ export function resolveAttemptSpawnWorkspaceDir(params: {
     : undefined;
 }
 
+function isOpenAIPublicResponsesBaseUrl(baseUrl?: string | null): boolean {
+  const trimmed = baseUrl?.trim();
+  if (!trimmed) {
+    return true;
+  }
+  return /^https?:\/\/api\.openai\.com(?:\/v1)?\/?$/i.test(trimmed);
+}
+
 export function shouldUseOpenAIWebSocketTransport(params: {
   provider: string;
   modelApi?: string | null;
+  modelBaseUrl?: string | null;
 }): boolean {
-  // openai-codex normalizes to the ChatGPT backend HTTP path, not the public
-  // OpenAI Responses websocket endpoint. Keep it on HTTP until a provider-
-  // specific websocket target exists and is verified end-to-end.
-  return params.modelApi === "openai-responses" && params.provider === "openai";
+  return (
+    params.provider === "openai" &&
+    params.modelApi === "openai-responses" &&
+    isOpenAIPublicResponsesBaseUrl(params.modelBaseUrl)
+  );
 }
 
 export function shouldAppendAttemptCacheTtl(params: {
