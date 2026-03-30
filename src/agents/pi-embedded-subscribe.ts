@@ -114,11 +114,16 @@ export function subscribeEmbeddedPiSession(params: SubscribeEmbeddedPiSessionPar
     if (!params.onBlockReply) {
       return;
     }
-    void Promise.resolve()
-      .then(() => params.onBlockReply?.(payload))
-      .catch((err) => {
-        log.warn(`block reply callback failed: ${String(err)}`);
-      });
+    try {
+      const result = params.onBlockReply(payload);
+      if (result && typeof result === "object" && "then" in result) {
+        void Promise.resolve(result).catch((err) => {
+          log.warn(`block reply callback failed: ${String(err)}`);
+        });
+      }
+    } catch (err) {
+      log.warn(`block reply callback failed: ${String(err)}`);
+    }
   };
   const emitBlockReply = (payload: BlockReplyPayload) => {
     emitBlockReplySafely(consumePendingToolMediaIntoReply(state, payload));
