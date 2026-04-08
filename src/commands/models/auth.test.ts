@@ -1,9 +1,6 @@
-import { spawnSync } from "node:child_process";
-import fs from "node:fs/promises";
-import os from "node:os";
-import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
+import type { ProviderPlugin } from "../../plugins/types.js";
 import type { RuntimeEnv } from "../../runtime.js";
 
 const mocks = vi.hoisted(() => ({
@@ -13,7 +10,6 @@ const mocks = vi.hoisted(() => ({
   clackSelect: vi.fn(),
   clackText: vi.fn(),
   resolveOpenClawAgentDir: vi.fn(),
-  listAgentIds: vi.fn(),
   resolveDefaultAgentId: vi.fn(),
   resolveAgentDir: vi.fn(),
   resolveAgentWorkspaceDir: vi.fn(),
@@ -21,12 +17,20 @@ const mocks = vi.hoisted(() => ({
   upsertAuthProfileOrThrow: vi.fn(),
   resolvePluginProviders: vi.fn(),
   createClackPrompter: vi.fn(),
-  loginOpenAICodexOAuth: vi.fn(),
-  writeOAuthCredentials: vi.fn(),
   loadValidConfigOrThrow: vi.fn(),
+  resolveKnownAgentId: vi.fn(),
   updateConfig: vi.fn(),
   logConfigUpdated: vi.fn(),
   openUrl: vi.fn(),
+  loadAuthProfileStoreForRuntime: vi.fn(),
+  listProfilesForProvider: vi.fn(),
+  clearAuthProfileCooldown: vi.fn(),
+}));
+
+vi.mock("../../agents/auth-profiles.js", () => ({
+  loadAuthProfileStoreForRuntime: mocks.loadAuthProfileStoreForRuntime,
+  listProfilesForProvider: mocks.listProfilesForProvider,
+  clearAuthProfileCooldown: mocks.clearAuthProfileCooldown,
 }));
 
 vi.mock("@clack/prompts", () => ({
@@ -42,7 +46,6 @@ vi.mock("../../agents/agent-paths.js", () => ({
 }));
 
 vi.mock("../../agents/agent-scope.js", () => ({
-  listAgentIds: mocks.listAgentIds,
   resolveDefaultAgentId: mocks.resolveDefaultAgentId,
   resolveAgentDir: mocks.resolveAgentDir,
   resolveAgentWorkspaceDir: mocks.resolveAgentWorkspaceDir,
@@ -52,35 +55,24 @@ vi.mock("../../agents/workspace.js", () => ({
   resolveDefaultAgentWorkspaceDir: mocks.resolveDefaultAgentWorkspaceDir,
 }));
 
-vi.mock("../auth-profile-write.js", () => ({
-  upsertAuthProfileOrThrow: mocks.upsertAuthProfileOrThrow,
+vi.mock("../../plugins/providers.runtime.js", () => ({
+  resolvePluginProviders: mocks.resolvePluginProviders,
 }));
 
-vi.mock("../../plugins/providers.js", () => ({
-  resolvePluginProviders: mocks.resolvePluginProviders,
+vi.mock("../auth-profile-write.js", () => ({
+  upsertAuthProfileOrThrow: mocks.upsertAuthProfileOrThrow,
 }));
 
 vi.mock("../../wizard/clack-prompter.js", () => ({
   createClackPrompter: mocks.createClackPrompter,
 }));
 
-vi.mock("../openai-codex-oauth.js", () => ({
-  loginOpenAICodexOAuth: mocks.loginOpenAICodexOAuth,
-}));
-
-vi.mock("../onboard-auth.js", async (importActual) => {
-  const actual = await importActual<typeof import("../onboard-auth.js")>();
-  return {
-    ...actual,
-    writeOAuthCredentials: mocks.writeOAuthCredentials,
-  };
-});
-
 vi.mock("./shared.js", async (importActual) => {
   const actual = await importActual<typeof import("./shared.js")>();
   return {
     ...actual,
     loadValidConfigOrThrow: mocks.loadValidConfigOrThrow,
+    resolveKnownAgentId: mocks.resolveKnownAgentId,
     updateConfig: mocks.updateConfig,
   };
 });
@@ -93,7 +85,8 @@ vi.mock("../onboard-helpers.js", () => ({
   openUrl: mocks.openUrl,
 }));
 
-const { modelsAuthLoginCommand, modelsAuthPasteTokenCommand } = await import("./auth.js");
+const { modelsAuthLoginCommand, modelsAuthPasteTokenCommand, modelsAuthSetupTokenCommand } =
+  await import("./auth.js");
 
 function createRuntime(): RuntimeEnv {
   return {
@@ -131,10 +124,35 @@ function restoreEnv(previous: Record<string, string | undefined>) {
   }
 }
 
+function createProvider(params: {
+  id: string;
+  label?: string;
+  methodId?: string;
+  methodLabel?: string;
+  kind?: NonNullable<ProviderPlugin["auth"]>[number]["kind"];
+  hint?: string;
+  run: NonNullable<ProviderPlugin["auth"]>[number]["run"];
+}): ProviderPlugin {
+  return {
+    id: params.id,
+    label: params.label ?? params.id,
+    auth: [
+      {
+        id: params.methodId ?? "oauth",
+        label: params.methodLabel ?? "OAuth",
+        kind: params.kind ?? "oauth",
+        hint: params.hint,
+        run: params.run,
+      },
+    ],
+  };
+}
+
 describe("modelsAuthLoginCommand", () => {
   let restoreStdin: (() => void) | null = null;
   let currentConfig: OpenClawConfig;
   let lastUpdatedConfig: OpenClawConfig | null;
+  let runProviderAuth: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -149,16 +167,23 @@ describe("modelsAuthLoginCommand", () => {
     mocks.clackSelect.mockReset();
     mocks.clackText.mockReset();
     mocks.resolveOpenClawAgentDir.mockReset();
-    mocks.listAgentIds.mockReset();
     mocks.upsertAuthProfileOrThrow.mockReset();
+    mocks.resolveKnownAgentId.mockReset();
 
-    mocks.listAgentIds.mockReturnValue(["main", "ops"]);
     mocks.resolveDefaultAgentId.mockReturnValue("main");
     mocks.resolveOpenClawAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
-    mocks.resolveAgentDir.mockReturnValue("/tmp/openclaw/agents/main");
-    mocks.resolveAgentWorkspaceDir.mockReturnValue("/tmp/openclaw/workspace");
+    mocks.resolveAgentDir.mockImplementation(
+      (_cfg: OpenClawConfig, agentId: string) => `/tmp/openclaw/agents/${agentId}`,
+    );
+    mocks.resolveAgentWorkspaceDir.mockImplementation(
+      (_cfg: OpenClawConfig, agentId: string) =>
+        agentId === "ops" ? "/tmp/openclaw/workspace-ops" : "/tmp/openclaw/workspace",
+    );
     mocks.resolveDefaultAgentWorkspaceDir.mockReturnValue("/tmp/openclaw/workspace");
     mocks.loadValidConfigOrThrow.mockImplementation(async () => currentConfig);
+    mocks.resolveKnownAgentId.mockImplementation(({ rawAgentId }: { rawAgentId?: string }) =>
+      rawAgentId?.trim() ? rawAgentId.trim() : undefined,
+    );
     mocks.updateConfig.mockImplementation(
       async (mutator: (cfg: OpenClawConfig) => OpenClawConfig) => {
         lastUpdatedConfig = mutator(currentConfig);
@@ -170,16 +195,32 @@ describe("modelsAuthLoginCommand", () => {
       note: vi.fn(async () => {}),
       select: vi.fn(),
     });
-    mocks.loginOpenAICodexOAuth.mockResolvedValue({
-      type: "oauth",
-      provider: "openai-codex",
-      access: "access-token",
-      refresh: "refresh-token",
-      expires: Date.now() + 60_000,
-      email: "user@example.com",
+    runProviderAuth = vi.fn().mockResolvedValue({
+      profiles: [
+        {
+          profileId: "openai-codex:user@example.com",
+          credential: {
+            type: "oauth",
+            provider: "openai-codex",
+            access: "access-token",
+            refresh: "refresh-token",
+            expires: Date.now() + 60_000,
+            email: "user@example.com",
+          },
+        },
+      ],
+      defaultModel: "openai-codex/gpt-5.4",
     });
-    mocks.writeOAuthCredentials.mockResolvedValue("openai-codex:user@example.com");
-    mocks.resolvePluginProviders.mockReturnValue([]);
+    mocks.resolvePluginProviders.mockReturnValue([
+      createProvider({
+        id: "openai-codex",
+        label: "OpenAI Codex",
+        run: runProviderAuth as ProviderPlugin["auth"][number]["run"],
+      }),
+    ]);
+    mocks.loadAuthProfileStoreForRuntime.mockReturnValue({ profiles: {}, usageStats: {} });
+    mocks.listProfilesForProvider.mockReturnValue([]);
+    mocks.clearAuthProfileCooldown.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -187,19 +228,20 @@ describe("modelsAuthLoginCommand", () => {
     restoreStdin = null;
   });
 
-  it("supports built-in openai-codex login without provider plugins", async () => {
+  it("runs plugin-owned openai-codex login", async () => {
     const runtime = createRuntime();
 
     await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
 
-    expect(mocks.loginOpenAICodexOAuth).toHaveBeenCalledOnce();
-    expect(mocks.writeOAuthCredentials).toHaveBeenCalledWith(
-      "openai-codex",
-      expect.any(Object),
-      "/tmp/openclaw/agents/main",
-      { syncSiblingAgents: true },
-    );
-    expect(mocks.resolvePluginProviders).not.toHaveBeenCalled();
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
+      profileId: "openai-codex:user@example.com",
+      credential: expect.objectContaining({
+        type: "oauth",
+        provider: "openai-codex",
+      }),
+      agentDir: "/tmp/openclaw/agents/main",
+    });
     expect(lastUpdatedConfig?.auth?.profiles?.["openai-codex:user@example.com"]).toMatchObject({
       provider: "openai-codex",
       mode: "oauth",
@@ -210,98 +252,8 @@ describe("modelsAuthLoginCommand", () => {
     expect(runtime.log).toHaveBeenCalledWith(
       "Default model available: openai-codex/gpt-5.4 (use --set-default to apply)",
     );
-  });
-
-  it("ignores ambient env agent-dir redirects without docker helper targeting", async () => {
-    const runtime = createRuntime();
-    mocks.resolveDefaultAgentId.mockReturnValue("ops");
-    mocks.listAgentIds.mockReturnValue(["ops"]);
-    mocks.resolveOpenClawAgentDir.mockReturnValue("/env/agents/ops");
-    mocks.resolveAgentDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/agents/${agentId}`,
-    );
-
-    const previous = {
-      OPENCLAW_AGENT_DIR: process.env.OPENCLAW_AGENT_DIR,
-      PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
-      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-    };
-    process.env.OPENCLAW_AGENT_DIR = "/env/agents/ops";
-    process.env.PI_CODING_AGENT_DIR = "/env/agents/ops";
-    delete process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-    try {
-      await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
-    } finally {
-      restoreEnv(previous);
-    }
-
-    expect(mocks.writeOAuthCredentials).toHaveBeenCalledWith(
-      "openai-codex",
-      expect.any(Object),
-      "/config/agents/ops",
-      { syncSiblingAgents: true },
-    );
-  });
-
-  it("uses docker helper agent-dir redirects for the implicit default agent", async () => {
-    const runtime = createRuntime();
-    mocks.resolveDefaultAgentId.mockReturnValue("ops");
-    mocks.listAgentIds.mockReturnValue(["ops"]);
-    mocks.resolveOpenClawAgentDir.mockReturnValue("/env/agents/ops");
-    mocks.resolveAgentDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/agents/${agentId}`,
-    );
-
-    const previous = {
-      OPENCLAW_AGENT_DIR: process.env.OPENCLAW_AGENT_DIR,
-      PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
-      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-    };
-    process.env.OPENCLAW_AGENT_DIR = "/env/agents/ops";
-    process.env.PI_CODING_AGENT_DIR = "/env/agents/ops";
-    process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = "ops";
-    try {
-      await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
-    } finally {
-      restoreEnv(previous);
-    }
-
-    expect(mocks.writeOAuthCredentials).toHaveBeenCalledWith(
-      "openai-codex",
-      expect.any(Object),
-      "/env/agents/ops",
-      { syncSiblingAgents: true },
-    );
-  });
-
-  it("lets explicit --agent override ambient env agent-dir redirects", async () => {
-    const runtime = createRuntime();
-    mocks.resolveDefaultAgentId.mockReturnValue("ops");
-    mocks.listAgentIds.mockReturnValue(["ops"]);
-    mocks.resolveOpenClawAgentDir.mockReturnValue("/env/agents/ops");
-    mocks.resolveAgentDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/agents/${agentId}`,
-    );
-
-    const previous = {
-      OPENCLAW_AGENT_DIR: process.env.OPENCLAW_AGENT_DIR,
-      PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
-      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-    };
-    process.env.OPENCLAW_AGENT_DIR = "/env/agents/ops";
-    process.env.PI_CODING_AGENT_DIR = "/env/agents/ops";
-    delete process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-    try {
-      await modelsAuthLoginCommand({ provider: "openai-codex", agent: "ops" }, runtime);
-    } finally {
-      restoreEnv(previous);
-    }
-
-    expect(mocks.writeOAuthCredentials).toHaveBeenCalledWith(
-      "openai-codex",
-      expect.any(Object),
-      "/config/agents/ops",
-      { syncSiblingAgents: true },
+    expect(runtime.log).toHaveBeenCalledWith(
+      "Tip: Codex-capable models can use native Codex web search. Enable it with openclaw configure --section web (recommended mode: cached). Docs: https://docs.openclaw.ai/tools/web",
     );
   });
 
@@ -316,11 +268,414 @@ describe("modelsAuthLoginCommand", () => {
     expect(runtime.log).toHaveBeenCalledWith("Default model set to openai-codex/gpt-5.4");
   });
 
-  it("keeps existing plugin error behavior for non built-in providers", async () => {
+  it("supports provider-owned Claude CLI migration without writing auth profiles", async () => {
+    const runtime = createRuntime();
+    const runClaudeCliMigration = vi.fn().mockResolvedValue({
+      profiles: [],
+      defaultModel: "claude-cli/claude-sonnet-4-6",
+      configPatch: {
+        agents: {
+          defaults: {
+            models: {
+              "claude-cli/claude-sonnet-4-6": {},
+            },
+          },
+        },
+      },
+    });
+    mocks.resolvePluginProviders.mockReturnValue([
+      {
+        id: "anthropic",
+        label: "Anthropic",
+        auth: [
+          {
+            id: "cli",
+            label: "Claude CLI",
+            kind: "custom",
+            run: runClaudeCliMigration,
+          },
+        ],
+      },
+    ]);
+
+    await modelsAuthLoginCommand(
+      { provider: "anthropic", method: "cli", setDefault: true },
+      runtime,
+    );
+
+    expect(runClaudeCliMigration).toHaveBeenCalledOnce();
+    expect(mocks.upsertAuthProfileOrThrow).not.toHaveBeenCalled();
+    expect(lastUpdatedConfig?.agents?.defaults?.model).toEqual({
+      primary: "claude-cli/claude-sonnet-4-6",
+    });
+    expect(lastUpdatedConfig?.agents?.defaults?.models).toEqual({
+      "claude-cli/claude-sonnet-4-6": {},
+    });
+    expect(runtime.log).toHaveBeenCalledWith("Default model set to claude-cli/claude-sonnet-4-6");
+  });
+
+  it("loads the owning plugin for an explicit provider even in a clean config", async () => {
+    const runtime = createRuntime();
+    const runClaudeCliMigration = vi.fn().mockResolvedValue({
+      profiles: [],
+      defaultModel: "claude-cli/claude-sonnet-4-6",
+      configPatch: {
+        agents: {
+          defaults: {
+            models: {
+              "claude-cli/claude-sonnet-4-6": {},
+            },
+          },
+        },
+      },
+    });
+    mocks.resolvePluginProviders.mockImplementation(
+      (params: { activate?: boolean; providerRefs?: string[] } | undefined) =>
+        params?.activate === true && params?.providerRefs?.[0] === "anthropic"
+          ? [
+              {
+                id: "anthropic",
+                label: "Anthropic",
+                auth: [
+                  {
+                    id: "cli",
+                    label: "Claude CLI",
+                    kind: "custom",
+                    run: runClaudeCliMigration,
+                  },
+                ],
+              },
+            ]
+          : [],
+    );
+
+    await modelsAuthLoginCommand(
+      { provider: "anthropic", method: "cli", setDefault: true },
+      runtime,
+    );
+
+    expect(mocks.resolvePluginProviders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        config: {},
+        workspaceDir: "/tmp/openclaw/workspace",
+        bundledProviderAllowlistCompat: true,
+        bundledProviderVitestCompat: true,
+        providerRefs: ["anthropic"],
+        activate: true,
+      }),
+    );
+    expect(runClaudeCliMigration).toHaveBeenCalledOnce();
+  });
+
+  it("uses docker helper overrides for a non-default agent target", async () => {
+    const runtime = createRuntime();
+    const providerRun = vi.fn().mockImplementation(async (ctx) => {
+      expect(ctx.agentDir).toBe("/docker/agents/ops");
+      expect(ctx.workspaceDir).toBe("/docker/workspace");
+      return {
+        profiles: [
+          {
+            profileId: "openai-codex:user@example.com",
+            credential: {
+              type: "oauth",
+              provider: "openai-codex",
+              access: "access-token",
+              refresh: "refresh-token",
+              expires: Date.now() + 60_000,
+              email: "user@example.com",
+            },
+          },
+        ],
+      };
+    });
+    mocks.resolvePluginProviders.mockReturnValue([
+      createProvider({
+        id: "openai-codex",
+        label: "OpenAI Codex",
+        run: providerRun as ProviderPlugin["auth"][number]["run"],
+      }),
+    ]);
+    mocks.resolveOpenClawAgentDir.mockReturnValue("/docker/agents/ops");
+
+    const previous = {
+      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
+      OPENCLAW_WORKSPACE_DIR: process.env.OPENCLAW_WORKSPACE_DIR,
+    };
+    process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = "ops";
+    process.env.OPENCLAW_WORKSPACE_DIR = "/docker/workspace";
+    try {
+      await modelsAuthLoginCommand({ provider: "openai-codex", agent: "ops" }, runtime);
+    } finally {
+      restoreEnv(previous);
+    }
+
+    expect(mocks.resolvePluginProviders).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workspaceDir: "/docker/workspace",
+        providerRefs: ["openai-codex"],
+        activate: true,
+      }),
+    );
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/docker/agents/ops",
+      }),
+    );
+  });
+
+  it("ignores ambient docker-helper paths when the explicit agent does not match", async () => {
+    const runtime = createRuntime();
+    const providerRun = vi.fn().mockImplementation(async (ctx) => {
+      expect(ctx.agentDir).toBe("/tmp/openclaw/agents/ops");
+      expect(ctx.workspaceDir).toBe("/tmp/openclaw/workspace-ops");
+      return {
+        profiles: [
+          {
+            profileId: "openai-codex:user@example.com",
+            credential: {
+              type: "oauth",
+              provider: "openai-codex",
+              access: "access-token",
+              refresh: "refresh-token",
+              expires: Date.now() + 60_000,
+              email: "user@example.com",
+            },
+          },
+        ],
+      };
+    });
+    mocks.resolvePluginProviders.mockReturnValue([
+      createProvider({
+        id: "openai-codex",
+        label: "OpenAI Codex",
+        run: providerRun as ProviderPlugin["auth"][number]["run"],
+      }),
+    ]);
+    mocks.resolveOpenClawAgentDir.mockReturnValue("/env/agents/main");
+
+    const previous = {
+      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
+      OPENCLAW_WORKSPACE_DIR: process.env.OPENCLAW_WORKSPACE_DIR,
+    };
+    process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = "main";
+    process.env.OPENCLAW_WORKSPACE_DIR = "/env/workspace";
+    try {
+      await modelsAuthLoginCommand({ provider: "openai-codex", agent: "ops" }, runtime);
+    } finally {
+      restoreEnv(previous);
+    }
+
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentDir: "/tmp/openclaw/agents/ops",
+      }),
+    );
+  });
+
+  it("runs the requested anthropic cli auth method with the full login context", async () => {
+    const runtime = createRuntime();
+    currentConfig = {
+      agents: {
+        defaults: {
+          model: {
+            primary: "anthropic/claude-sonnet-4-6",
+            fallbacks: ["anthropic/claude-opus-4-6", "openai/gpt-5.2"],
+          },
+          models: {
+            "anthropic/claude-sonnet-4-6": { alias: "Sonnet" },
+            "anthropic/claude-opus-4-6": { alias: "Opus" },
+            "openai/gpt-5.2": {},
+          },
+        },
+      },
+    };
+    const note = vi.fn(async () => {});
+    mocks.createClackPrompter.mockReturnValue({
+      note,
+      select: vi.fn(),
+    });
+    const runApiKeyAuth = vi.fn();
+    const runClaudeCliMigration = vi.fn().mockImplementation(async (ctx) => {
+      expect(ctx.config).toEqual(currentConfig);
+      expect(ctx.agentDir).toBe("/tmp/openclaw/agents/main");
+      expect(ctx.workspaceDir).toBe("/tmp/openclaw/workspace");
+      expect(ctx.prompter).toMatchObject({ note, select: expect.any(Function) });
+      expect(ctx.runtime).toBe(runtime);
+      expect(ctx.env).toBe(process.env);
+      expect(ctx.allowSecretRefPrompt).toBe(false);
+      expect(ctx.isRemote).toBe(false);
+      expect(ctx.openUrl).toEqual(expect.any(Function));
+      expect(ctx.oauth).toMatchObject({
+        createVpsAwareHandlers: expect.any(Function),
+      });
+      return {
+        profiles: [],
+        defaultModel: "claude-cli/claude-sonnet-4-6",
+        configPatch: {
+          agents: {
+            defaults: {
+              model: {
+                primary: "claude-cli/claude-sonnet-4-6",
+                fallbacks: ["claude-cli/claude-opus-4-6", "openai/gpt-5.2"],
+              },
+              models: {
+                "claude-cli/claude-sonnet-4-6": { alias: "Sonnet" },
+                "claude-cli/claude-opus-4-6": { alias: "Opus" },
+                "openai/gpt-5.2": {},
+              },
+            },
+          },
+        },
+        notes: [
+          "Claude CLI auth detected; switched Anthropic model selection to the local Claude CLI backend.",
+          "Existing Anthropic auth profiles are kept for rollback.",
+        ],
+      };
+    });
+    const fakeStore = {
+      profiles: {
+        "anthropic:claude-cli": {
+          type: "oauth",
+          provider: "anthropic",
+        },
+        "anthropic:legacy": {
+          type: "token",
+          provider: "anthropic",
+        },
+      },
+      usageStats: {
+        "anthropic:claude-cli": {
+          disabledUntil: Date.now() + 3_600_000,
+          disabledReason: "auth_permanent",
+          errorCount: 2,
+        },
+      },
+    };
+    mocks.loadAuthProfileStoreForRuntime.mockReturnValue(fakeStore);
+    mocks.listProfilesForProvider.mockReturnValue(["anthropic:claude-cli", "anthropic:legacy"]);
+    mocks.resolvePluginProviders.mockReturnValue([
+      {
+        id: "anthropic",
+        label: "Anthropic",
+        auth: [
+          {
+            id: "cli",
+            label: "Claude CLI",
+            kind: "custom",
+            run: runClaudeCliMigration,
+          },
+          {
+            id: "api-key",
+            label: "Anthropic API key",
+            kind: "api_key",
+            run: runApiKeyAuth,
+          },
+        ],
+      },
+    ]);
+
+    await modelsAuthLoginCommand(
+      { provider: "anthropic", method: "cli", setDefault: true },
+      runtime,
+    );
+
+    expect(runClaudeCliMigration).toHaveBeenCalledOnce();
+    expect(runApiKeyAuth).not.toHaveBeenCalled();
+    expect(mocks.clearAuthProfileCooldown).toHaveBeenCalledTimes(2);
+    expect(mocks.clearAuthProfileCooldown).toHaveBeenNthCalledWith(1, {
+      store: fakeStore,
+      profileId: "anthropic:claude-cli",
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+    expect(mocks.clearAuthProfileCooldown).toHaveBeenNthCalledWith(2, {
+      store: fakeStore,
+      profileId: "anthropic:legacy",
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+    expect(
+      mocks.clearAuthProfileCooldown.mock.invocationCallOrder.every(
+        (order) => order < runClaudeCliMigration.mock.invocationCallOrder[0],
+      ),
+    ).toBe(true);
+    expect(mocks.upsertAuthProfileOrThrow).not.toHaveBeenCalled();
+    expect(lastUpdatedConfig?.agents?.defaults?.model).toEqual({
+      primary: "claude-cli/claude-sonnet-4-6",
+      fallbacks: ["claude-cli/claude-opus-4-6", "openai/gpt-5.2"],
+    });
+    expect(lastUpdatedConfig?.agents?.defaults?.models).toEqual({
+      "claude-cli/claude-sonnet-4-6": { alias: "Sonnet" },
+      "claude-cli/claude-opus-4-6": { alias: "Opus" },
+      "openai/gpt-5.2": {},
+    });
+    expect(note).toHaveBeenCalledWith(
+      [
+        "Claude CLI auth detected; switched Anthropic model selection to the local Claude CLI backend.",
+        "Existing Anthropic auth profiles are kept for rollback.",
+      ].join("\n"),
+      "Provider notes",
+    );
+    expect(runtime.log).toHaveBeenCalledWith("Default model set to claude-cli/claude-sonnet-4-6");
+  });
+
+  it("clears stale auth lockouts before attempting openai-codex login", async () => {
+    const runtime = createRuntime();
+    const fakeStore = {
+      profiles: {
+        "openai-codex:user@example.com": {
+          type: "oauth",
+          provider: "openai-codex",
+        },
+      },
+      usageStats: {
+        "openai-codex:user@example.com": {
+          disabledUntil: Date.now() + 3_600_000,
+          disabledReason: "auth_permanent",
+          errorCount: 3,
+        },
+      },
+    };
+    mocks.loadAuthProfileStoreForRuntime.mockReturnValue(fakeStore);
+    mocks.listProfilesForProvider.mockReturnValue(["openai-codex:user@example.com"]);
+
+    await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
+
+    expect(mocks.clearAuthProfileCooldown).toHaveBeenCalledWith({
+      store: fakeStore,
+      profileId: "openai-codex:user@example.com",
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+    // Verify clearing happens before login attempt
+    const clearOrder = mocks.clearAuthProfileCooldown.mock.invocationCallOrder[0];
+    const loginOrder = runProviderAuth.mock.invocationCallOrder[0];
+    expect(clearOrder).toBeLessThan(loginOrder);
+  });
+
+  it("survives lockout clearing failure without blocking login", async () => {
+    const runtime = createRuntime();
+    mocks.loadAuthProfileStoreForRuntime.mockImplementation(() => {
+      throw new Error("corrupt auth-profiles.json");
+    });
+
+    await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
+
+    expect(runProviderAuth).toHaveBeenCalledOnce();
+  });
+
+  it("loads lockout state from the agent-scoped store", async () => {
+    const runtime = createRuntime();
+    mocks.loadAuthProfileStoreForRuntime.mockReturnValue({ profiles: {}, usageStats: {} });
+    mocks.listProfilesForProvider.mockReturnValue([]);
+
+    await modelsAuthLoginCommand({ provider: "openai-codex" }, runtime);
+
+    expect(mocks.loadAuthProfileStoreForRuntime).toHaveBeenCalledWith("/tmp/openclaw/agents/main");
+  });
+
+  it("reports loaded plugin providers when requested provider is unavailable", async () => {
     const runtime = createRuntime();
 
     await expect(modelsAuthLoginCommand({ provider: "anthropic" }, runtime)).rejects.toThrow(
-      "No provider plugins found.",
+      'Unknown provider "anthropic". Loaded providers: openai-codex. Verify plugins via `openclaw plugins list --json`.',
     );
   });
 
@@ -348,112 +703,165 @@ describe("modelsAuthLoginCommand", () => {
     }
   });
 
-  it("uses docker helper overrides for a non-default agent target", async () => {
+  it("writes pasted tokens to the resolved agent store", async () => {
     const runtime = createRuntime();
-    const note = vi.fn(async () => {});
-    const select = vi.fn().mockResolvedValue("oauth");
-    const providerRun = vi.fn().mockResolvedValue({
-      profiles: [
-        {
-          profileId: "example:user@example.com",
-          credential: {
-            type: "oauth",
-            provider: "example",
-            email: "user@example.com",
-            access: "token",
-          },
-        },
-      ],
-      defaultModel: "example/model",
-    });
-    mocks.resolveDefaultAgentId.mockReturnValue("main");
-    mocks.resolveOpenClawAgentDir.mockReturnValue("/docker/agents/ops/agent");
-    mocks.resolveAgentDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/agents/${agentId}`,
-    );
-    mocks.resolveAgentWorkspaceDir.mockReturnValue("/config/workspaces/ops");
-    mocks.createClackPrompter.mockReturnValue({ note, select });
-    mocks.resolvePluginProviders.mockReturnValue([
-      {
-        id: "example",
-        label: "Example",
-        auth: [{ id: "oauth", label: "OAuth", run: providerRun }],
+    mocks.clackText.mockResolvedValue("tok-fresh");
+
+    await modelsAuthPasteTokenCommand({ provider: "openai" }, runtime);
+
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
+      profileId: "openai:manual",
+      credential: {
+        type: "token",
+        provider: "openai",
+        token: "tok-fresh",
       },
-    ]);
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+  });
 
-    const previous = {
-      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-      OPENCLAW_WORKSPACE_DIR: process.env.OPENCLAW_WORKSPACE_DIR,
-    };
-    process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = "ops";
-    process.env.OPENCLAW_WORKSPACE_DIR = "/docker/workspace";
-    try {
-      await modelsAuthLoginCommand({ provider: "example", agent: "ops" }, runtime);
-    } finally {
-      if (previous.OPENCLAW_DOCKER_AUTH_AGENT_ID === undefined) {
-        delete process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-      } else {
-        process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = previous.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-      }
-      if (previous.OPENCLAW_WORKSPACE_DIR === undefined) {
-        delete process.env.OPENCLAW_WORKSPACE_DIR;
-      } else {
-        process.env.OPENCLAW_WORKSPACE_DIR = previous.OPENCLAW_WORKSPACE_DIR;
-      }
-    }
+  it("writes pasted Anthropic setup-tokens and logs the preference note", async () => {
+    const runtime = createRuntime();
+    mocks.clackText.mockResolvedValue(`sk-ant-oat01-${"a".repeat(80)}`);
 
-    expect(mocks.resolvePluginProviders).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDir: "/docker/workspace",
-      }),
+    await modelsAuthPasteTokenCommand({ provider: "anthropic" }, runtime);
+
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
+      profileId: "anthropic:manual",
+      credential: {
+        type: "token",
+        provider: "anthropic",
+        token: `sk-ant-oat01-${"a".repeat(80)}`,
+      },
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+    expect(runtime.log).toHaveBeenCalledWith(
+      "Anthropic setup-token auth is supported in OpenClaw.",
     );
-    expect(providerRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentDir: "/docker/agents/ops/agent",
-        workspaceDir: "/docker/workspace",
-      }),
+    expect(runtime.log).toHaveBeenCalledWith(
+      "OpenClaw prefers Claude CLI reuse when it is available on the host.",
     );
-    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentDir: "/docker/agents/ops/agent",
-      }),
+    expect(runtime.log).toHaveBeenCalledWith(
+      "Anthropic staff told us this OpenClaw path is allowed again.",
     );
   });
 
-  it("falls back to the non-default agent workspace when no docker workspace override is set", async () => {
+  it("runs token auth for any token-capable provider plugin", async () => {
     const runtime = createRuntime();
-    const note = vi.fn(async () => {});
-    const select = vi.fn().mockResolvedValue("oauth");
-    const providerRun = vi.fn().mockResolvedValue({
+    const runTokenAuth = vi.fn().mockResolvedValue({
       profiles: [
         {
-          profileId: "example:user@example.com",
+          profileId: "moonshot:token",
           credential: {
-            type: "oauth",
-            provider: "example",
-            email: "user@example.com",
-            access: "token",
+            type: "token",
+            provider: "moonshot",
+            token: "moonshot-token",
           },
         },
       ],
-      defaultModel: "example/model",
     });
-    mocks.resolveDefaultAgentId.mockReturnValue("main");
-    mocks.resolveOpenClawAgentDir.mockReturnValue("/docker/agents/ops/agent");
-    mocks.resolveAgentDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/agents/${agentId}`,
-    );
-    mocks.resolveAgentWorkspaceDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/workspaces/${agentId}`,
-    );
-    mocks.createClackPrompter.mockReturnValue({ note, select });
     mocks.resolvePluginProviders.mockReturnValue([
       {
-        id: "example",
-        label: "Example",
-        auth: [{ id: "oauth", label: "OAuth", run: providerRun }],
+        id: "moonshot",
+        label: "Moonshot",
+        auth: [
+          {
+            id: "setup-token",
+            label: "setup-token",
+            kind: "token",
+            run: runTokenAuth,
+          },
+        ],
       },
     ]);
+
+    await modelsAuthSetupTokenCommand({ provider: "moonshot", yes: true }, runtime);
+
+    expect(runTokenAuth).toHaveBeenCalledOnce();
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
+      profileId: "moonshot:token",
+      credential: {
+        type: "token",
+        provider: "moonshot",
+        token: "moonshot-token",
+      },
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+  });
+
+  it("runs setup-token for Anthropic when the provider exposes the method", async () => {
+    const runtime = createRuntime();
+    const runTokenAuth = vi.fn().mockResolvedValue({
+      profiles: [
+        {
+          profileId: "anthropic:default",
+          credential: {
+            type: "token",
+            provider: "anthropic",
+            token: `sk-ant-oat01-${"b".repeat(80)}`,
+          },
+        },
+      ],
+      defaultModel: "anthropic/claude-sonnet-4-6",
+    });
+    mocks.resolvePluginProviders.mockReturnValue([
+      {
+        id: "anthropic",
+        label: "Anthropic",
+        auth: [
+          {
+            id: "setup-token",
+            label: "setup-token",
+            kind: "token",
+            run: runTokenAuth,
+          },
+        ],
+      },
+    ]);
+
+    await modelsAuthSetupTokenCommand({ provider: "anthropic", yes: true }, runtime);
+
+    expect(runTokenAuth).toHaveBeenCalledOnce();
+    expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith({
+      profileId: "anthropic:default",
+      credential: {
+        type: "token",
+        provider: "anthropic",
+        token: `sk-ant-oat01-${"b".repeat(80)}`,
+      },
+      agentDir: "/tmp/openclaw/agents/main",
+    });
+  });
+
+  it("falls back to the agent workspace when docker helper auth has no workspace override", async () => {
+    const runtime = createRuntime();
+    const runTokenAuth = vi.fn().mockImplementation(async (ctx) => {
+      expect(ctx.agentDir).toBe("/docker/agents/ops");
+      expect(ctx.workspaceDir).toBe("/tmp/openclaw/workspace-ops");
+      return {
+        profiles: [
+          {
+            profileId: "moonshot:token",
+            credential: {
+              type: "token",
+              provider: "moonshot",
+              token: "moonshot-token",
+            },
+          },
+        ],
+      };
+    });
+    mocks.resolvePluginProviders.mockReturnValue([
+      createProvider({
+        id: "moonshot",
+        label: "Moonshot",
+        methodId: "setup-token",
+        methodLabel: "setup-token",
+        kind: "token",
+        run: runTokenAuth,
+      }),
+    ]);
+    mocks.resolveOpenClawAgentDir.mockReturnValue("/docker/agents/ops");
 
     const previous = {
       OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
@@ -462,384 +870,15 @@ describe("modelsAuthLoginCommand", () => {
     process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = "ops";
     delete process.env.OPENCLAW_WORKSPACE_DIR;
     try {
-      await modelsAuthLoginCommand({ provider: "example", agent: "ops" }, runtime);
+      await modelsAuthSetupTokenCommand({ provider: "moonshot", yes: true, agent: "ops" }, runtime);
     } finally {
-      if (previous.OPENCLAW_DOCKER_AUTH_AGENT_ID === undefined) {
-        delete process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-      } else {
-        process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = previous.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-      }
-      if (previous.OPENCLAW_WORKSPACE_DIR === undefined) {
-        delete process.env.OPENCLAW_WORKSPACE_DIR;
-      } else {
-        process.env.OPENCLAW_WORKSPACE_DIR = previous.OPENCLAW_WORKSPACE_DIR;
-      }
+      restoreEnv(previous);
     }
 
-    expect(mocks.resolvePluginProviders).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDir: "/config/workspaces/ops",
-      }),
-    );
-    expect(providerRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentDir: "/docker/agents/ops/agent",
-        workspaceDir: "/config/workspaces/ops",
-      }),
-    );
-  });
-
-  it("lets explicit --agent override default-agent env redirects", async () => {
-    const runtime = createRuntime();
-    const note = vi.fn(async () => {});
-    const select = vi.fn().mockResolvedValue("oauth");
-    const providerRun = vi.fn().mockResolvedValue({
-      profiles: [
-        {
-          profileId: "example:user@example.com",
-          credential: {
-            type: "oauth",
-            provider: "example",
-            email: "user@example.com",
-            access: "token",
-          },
-        },
-      ],
-      defaultModel: "example/model",
-    });
-    mocks.resolveDefaultAgentId.mockReturnValue("main");
-    mocks.resolveOpenClawAgentDir.mockReturnValue("/env/agents/main/agent");
-    mocks.resolveAgentDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/agents/${agentId}`,
-    );
-    mocks.resolveAgentWorkspaceDir.mockImplementation(
-      (_cfg: OpenClawConfig, agentId: string) => `/config/workspaces/${agentId}`,
-    );
-    mocks.createClackPrompter.mockReturnValue({ note, select });
-    mocks.resolvePluginProviders.mockReturnValue([
-      {
-        id: "example",
-        label: "Example",
-        auth: [{ id: "oauth", label: "OAuth", run: providerRun }],
-      },
-    ]);
-
-    const previous = {
-      OPENCLAW_AGENT_DIR: process.env.OPENCLAW_AGENT_DIR,
-      PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
-      OPENCLAW_DOCKER_AUTH_AGENT_ID: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-    };
-    process.env.OPENCLAW_AGENT_DIR = "/env/agents/main/agent";
-    process.env.PI_CODING_AGENT_DIR = "/env/agents/main/agent";
-    delete process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-    try {
-      await modelsAuthLoginCommand({ provider: "example", agent: "main" }, runtime);
-    } finally {
-      if (previous.OPENCLAW_AGENT_DIR === undefined) {
-        delete process.env.OPENCLAW_AGENT_DIR;
-      } else {
-        process.env.OPENCLAW_AGENT_DIR = previous.OPENCLAW_AGENT_DIR;
-      }
-      if (previous.PI_CODING_AGENT_DIR === undefined) {
-        delete process.env.PI_CODING_AGENT_DIR;
-      } else {
-        process.env.PI_CODING_AGENT_DIR = previous.PI_CODING_AGENT_DIR;
-      }
-      if (previous.OPENCLAW_DOCKER_AUTH_AGENT_ID === undefined) {
-        delete process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-      } else {
-        process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID = previous.OPENCLAW_DOCKER_AUTH_AGENT_ID;
-      }
-    }
-
-    expect(mocks.resolvePluginProviders).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspaceDir: "/config/workspaces/main",
-      }),
-    );
-    expect(providerRun).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentDir: "/config/agents/main",
-        workspaceDir: "/config/workspaces/main",
-      }),
-    );
     expect(mocks.upsertAuthProfileOrThrow).toHaveBeenCalledWith(
       expect.objectContaining({
-        agentDir: "/config/agents/main",
+        agentDir: "/docker/agents/ops",
       }),
     );
-  });
-});
-
-describe("docker-host-model-auth.sh", () => {
-  it("defaults to the configured default agent and its workspace path", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-docker-auth-"));
-    const stateDir = path.join(tempDir, "state");
-    const binDir = path.join(tempDir, "bin");
-    const capturePath = path.join(tempDir, "capture.json");
-    const invocationsPath = path.join(tempDir, "invocations.jsonl");
-    const fakePnpmPath = path.join(binDir, "pnpm");
-    await fs.mkdir(path.join(stateDir, "agents", "ops", "agent"), { recursive: true });
-    await fs.mkdir(binDir, { recursive: true });
-    await fs.writeFile(
-      fakePnpmPath,
-      `#!/usr/bin/env node
-const fs = require("node:fs");
-const args = process.argv.slice(2);
-fs.appendFileSync(process.env.INVOCATIONS_PATH, JSON.stringify(args) + "\\n");
-if (args[0] === "openclaw" && args[1] === "agents" && args[2] === "list" && args[3] === "--json") {
-  process.stdout.write(JSON.stringify([{ id: "ops", isDefault: true }]));
-  process.exit(0);
-}
-fs.writeFileSync(
-  process.env.CAPTURE_PATH,
-  JSON.stringify(
-    {
-      args,
-      agentId: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-      workspaceDir: process.env.OPENCLAW_WORKSPACE_DIR,
-      agentDir: process.env.OPENCLAW_AGENT_DIR,
-      piAgentDir: process.env.PI_CODING_AGENT_DIR,
-      configPath: process.env.OPENCLAW_CONFIG_PATH,
-    },
-    null,
-    2,
-  ),
-);
-`,
-      "utf8",
-    );
-    await fs.chmod(fakePnpmPath, 0o755);
-
-    const result = spawnSync(
-      "bash",
-      ["scripts/docker-host-model-auth.sh", "login", "--provider", "openai-codex"],
-      {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          OPENCLAW_CONFIG_DIR: stateDir,
-          CAPTURE_PATH: capturePath,
-          INVOCATIONS_PATH: invocationsPath,
-          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-        },
-        encoding: "utf8",
-      },
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(JSON.parse(await fs.readFile(capturePath, "utf8"))).toEqual({
-      args: ["openclaw", "models", "auth", "--agent", "ops", "login", "--provider", "openai-codex"],
-      agentId: "ops",
-      workspaceDir: path.join(stateDir, "workspace-ops"),
-      agentDir: path.join(stateDir, "agents", "ops", "agent"),
-      piAgentDir: path.join(stateDir, "agents", "ops", "agent"),
-      configPath: path.join(stateDir, "openclaw.json"),
-    });
-    expect((await fs.readFile(invocationsPath, "utf8")).trim().split("\n")).toHaveLength(2);
-
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  it("overrides ambient agent-dir env vars to keep helper writes inside OPENCLAW_CONFIG_DIR", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-docker-auth-"));
-    const stateDir = path.join(tempDir, "state");
-    const binDir = path.join(tempDir, "bin");
-    const capturePath = path.join(tempDir, "capture.json");
-    const fakePnpmPath = path.join(binDir, "pnpm");
-    await fs.mkdir(path.join(stateDir, "agents", "ops", "agent"), { recursive: true });
-    await fs.mkdir(binDir, { recursive: true });
-    await fs.writeFile(
-      fakePnpmPath,
-      `#!/usr/bin/env node
-const fs = require("node:fs");
-const args = process.argv.slice(2);
-if (args[0] === "openclaw" && args[1] === "agents" && args[2] === "list" && args[3] === "--json") {
-  process.stdout.write(JSON.stringify([{ id: "ops", isDefault: true }]));
-  process.exit(0);
-}
-fs.writeFileSync(
-  process.env.CAPTURE_PATH,
-  JSON.stringify(
-    {
-      agentDir: process.env.OPENCLAW_AGENT_DIR,
-      piAgentDir: process.env.PI_CODING_AGENT_DIR,
-    },
-    null,
-    2,
-  ),
-);
-`,
-      "utf8",
-    );
-    await fs.chmod(fakePnpmPath, 0o755);
-
-    const result = spawnSync("bash", ["scripts/docker-host-model-auth.sh", "login"], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        OPENCLAW_CONFIG_DIR: stateDir,
-        OPENCLAW_AGENT_DIR: "/outside/openclaw-agent",
-        PI_CODING_AGENT_DIR: "/outside/pi-agent",
-        CAPTURE_PATH: capturePath,
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-      },
-      encoding: "utf8",
-    });
-
-    expect(result.status).toBe(0);
-    expect(JSON.parse(await fs.readFile(capturePath, "utf8"))).toEqual({
-      agentDir: path.join(stateDir, "agents", "ops", "agent"),
-      piAgentDir: path.join(stateDir, "agents", "ops", "agent"),
-    });
-
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  it("falls back to main when default-agent lookup fails", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-docker-auth-"));
-    const stateDir = path.join(tempDir, "state");
-    const binDir = path.join(tempDir, "bin");
-    const capturePath = path.join(tempDir, "capture.json");
-    const invocationsPath = path.join(tempDir, "invocations.jsonl");
-    const fakePnpmPath = path.join(binDir, "pnpm");
-    await fs.mkdir(stateDir, { recursive: true });
-    await fs.mkdir(binDir, { recursive: true });
-    await fs.writeFile(
-      fakePnpmPath,
-      `#!/usr/bin/env node
-const fs = require("node:fs");
-const args = process.argv.slice(2);
-fs.appendFileSync(process.env.INVOCATIONS_PATH, JSON.stringify(args) + "\\n");
-if (args[0] === "openclaw" && args[1] === "agents" && args[2] === "list" && args[3] === "--json") {
-  process.exit(23);
-}
-fs.writeFileSync(
-  process.env.CAPTURE_PATH,
-  JSON.stringify(
-    {
-      args,
-      agentId: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-      workspaceDir: process.env.OPENCLAW_WORKSPACE_DIR,
-      agentDir: process.env.OPENCLAW_AGENT_DIR,
-      piAgentDir: process.env.PI_CODING_AGENT_DIR,
-      configPath: process.env.OPENCLAW_CONFIG_PATH,
-    },
-    null,
-    2,
-  ),
-);
-`,
-      "utf8",
-    );
-    await fs.chmod(fakePnpmPath, 0o755);
-
-    const result = spawnSync(
-      "bash",
-      ["scripts/docker-host-model-auth.sh", "login", "--provider", "openai-codex"],
-      {
-        cwd: process.cwd(),
-        env: {
-          ...process.env,
-          OPENCLAW_CONFIG_DIR: stateDir,
-          CAPTURE_PATH: capturePath,
-          INVOCATIONS_PATH: invocationsPath,
-          PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-        },
-        encoding: "utf8",
-      },
-    );
-
-    expect(result.status).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(JSON.parse(await fs.readFile(capturePath, "utf8"))).toEqual({
-      args: [
-        "openclaw",
-        "models",
-        "auth",
-        "--agent",
-        "main",
-        "login",
-        "--provider",
-        "openai-codex",
-      ],
-      agentId: "main",
-      workspaceDir: path.join(stateDir, "workspace"),
-      agentDir: path.join(stateDir, "agents", "main", "agent"),
-      piAgentDir: path.join(stateDir, "agents", "main", "agent"),
-      configPath: path.join(stateDir, "openclaw.json"),
-    });
-    expect((await fs.readFile(invocationsPath, "utf8")).trim().split("\n")).toHaveLength(2);
-
-    await fs.rm(tempDir, { recursive: true, force: true });
-  });
-
-  it("preserves explicit docker auth agent and workspace overrides", async () => {
-    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-docker-auth-"));
-    const stateDir = path.join(tempDir, "state");
-    const binDir = path.join(tempDir, "bin");
-    const capturePath = path.join(tempDir, "capture.json");
-    const invocationsPath = path.join(tempDir, "invocations.jsonl");
-    const fakePnpmPath = path.join(binDir, "pnpm");
-    await fs.mkdir(path.join(stateDir, "agents", "custom", "agent"), { recursive: true });
-    await fs.mkdir(binDir, { recursive: true });
-    await fs.writeFile(
-      fakePnpmPath,
-      `#!/usr/bin/env node
-const fs = require("node:fs");
-const args = process.argv.slice(2);
-fs.appendFileSync(process.env.INVOCATIONS_PATH, JSON.stringify(args) + "\\n");
-if (args[0] === "openclaw" && args[1] === "agents" && args[2] === "list" && args[3] === "--json") {
-  process.stdout.write(JSON.stringify([{ id: "ops", isDefault: true }]));
-  process.exit(0);
-}
-fs.writeFileSync(
-  process.env.CAPTURE_PATH,
-  JSON.stringify(
-    {
-      args,
-      agentId: process.env.OPENCLAW_DOCKER_AUTH_AGENT_ID,
-      workspaceDir: process.env.OPENCLAW_WORKSPACE_DIR,
-      agentDir: process.env.OPENCLAW_AGENT_DIR,
-      piAgentDir: process.env.PI_CODING_AGENT_DIR,
-      configPath: process.env.OPENCLAW_CONFIG_PATH,
-    },
-    null,
-    2,
-  ),
-);
-`,
-      "utf8",
-    );
-    await fs.chmod(fakePnpmPath, 0o755);
-
-    const result = spawnSync("bash", ["scripts/docker-host-model-auth.sh", "login"], {
-      cwd: process.cwd(),
-      env: {
-        ...process.env,
-        OPENCLAW_CONFIG_DIR: stateDir,
-        OPENCLAW_DOCKER_AUTH_AGENT_ID: "custom",
-        OPENCLAW_WORKSPACE_DIR: "/custom/workspace",
-        CAPTURE_PATH: capturePath,
-        INVOCATIONS_PATH: invocationsPath,
-        PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ""}`,
-      },
-      encoding: "utf8",
-    });
-
-    expect(result.status).toBe(0);
-    expect(result.stderr).toBe("");
-    expect(JSON.parse(await fs.readFile(capturePath, "utf8"))).toEqual({
-      args: ["openclaw", "models", "auth", "--agent", "custom", "login"],
-      agentId: "custom",
-      workspaceDir: "/custom/workspace",
-      agentDir: path.join(stateDir, "agents", "custom", "agent"),
-      piAgentDir: path.join(stateDir, "agents", "custom", "agent"),
-      configPath: path.join(stateDir, "openclaw.json"),
-    });
-    expect((await fs.readFile(invocationsPath, "utf8")).trim().split("\n")).toHaveLength(1);
-
-    await fs.rm(tempDir, { recursive: true, force: true });
   });
 });
