@@ -11,6 +11,8 @@ import {
 } from "./scope-errors.ts";
 
 const SILENT_REPLY_PATTERN = /^\s*NO_REPLY\s*$/;
+const SYNTHETIC_TRANSCRIPT_REPAIR_RESULT =
+  "[openclaw] missing tool result in session history; inserted synthetic error result for transcript repair.";
 const chatHistoryRequestVersions = new WeakMap<object, number>();
 
 function beginChatHistoryRequest(state: ChatState): number {
@@ -51,6 +53,23 @@ function isAssistantSilentReply(message: unknown): boolean {
   }
   const text = extractText(message);
   return typeof text === "string" && isSilentReplyStream(text);
+}
+
+function isSyntheticTranscriptRepairToolResult(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const entry = message as Record<string, unknown>;
+  const role = normalizeLowercaseStringOrEmpty(entry.role);
+  if (role !== "toolresult") {
+    return false;
+  }
+  const text = extractText(message);
+  return typeof text === "string" && text.trim() === SYNTHETIC_TRANSCRIPT_REPAIR_RESULT;
+}
+
+function shouldHideHistoryMessage(message: unknown): boolean {
+  return isAssistantSilentReply(message) || isSyntheticTranscriptRepairToolResult(message);
 }
 
 export type ChatState = {
@@ -109,7 +128,7 @@ export async function loadChatHistory(state: ChatState) {
       return;
     }
     const messages = Array.isArray(res.messages) ? res.messages : [];
-    state.chatMessages = messages.filter((message) => !isAssistantSilentReply(message));
+    state.chatMessages = messages.filter((message) => !shouldHideHistoryMessage(message));
     state.chatThinkingLevel = res.thinkingLevel ?? null;
     // Clear all streaming state — history includes tool results and text
     // inline, so keeping streaming artifacts would cause duplicates.
@@ -140,6 +159,38 @@ function dataUrlToBase64(dataUrl: string): { content: string; mimeType: string }
     return null;
   }
   return { mimeType: match[1], content: match[2] };
+}
+
+function buildApiAttachments(attachments?: ChatAttachment[]) {
+  const hasAttachments = attachments && attachments.length > 0;
+  return hasAttachments
+    ? attachments
+        .map((att) => {
+          const parsed = dataUrlToBase64(att.dataUrl);
+          if (!parsed) {
+            return null;
+          }
+          return {
+            type: "image",
+            mimeType: parsed.mimeType,
+            content: parsed.content,
+          };
+        })
+        .filter((a): a is NonNullable<typeof a> => a !== null)
+    : undefined;
+}
+
+async function requestChatSend(
+  state: ChatState,
+  params: { message: string; attachments?: ChatAttachment[]; runId: string },
+) {
+  await state.client!.request("chat.send", {
+    sessionKey: state.sessionKey,
+    message: params.message,
+    deliver: false,
+    idempotencyKey: params.runId,
+    attachments: buildApiAttachments(params.attachments),
+  });
 }
 
 type AssistantMessageNormalizationOptions = {
@@ -238,31 +289,8 @@ export async function sendChatMessage(
   state.chatStream = "";
   state.chatStreamStartedAt = now;
 
-  // Convert attachments to API format
-  const apiAttachments = hasAttachments
-    ? attachments
-        .map((att) => {
-          const parsed = dataUrlToBase64(att.dataUrl);
-          if (!parsed) {
-            return null;
-          }
-          return {
-            type: "image",
-            mimeType: parsed.mimeType,
-            content: parsed.content,
-          };
-        })
-        .filter((a): a is NonNullable<typeof a> => a !== null)
-    : undefined;
-
   try {
-    await state.client.request("chat.send", {
-      sessionKey: state.sessionKey,
-      message: msg,
-      deliver: false,
-      idempotencyKey: runId,
-      attachments: apiAttachments,
-    });
+    await requestChatSend(state, { message: msg, attachments, runId });
     return runId;
   } catch (err) {
     const error = formatConnectError(err);
@@ -281,6 +309,30 @@ export async function sendChatMessage(
     return null;
   } finally {
     state.chatSending = false;
+  }
+}
+
+export async function sendDetachedChatMessage(
+  state: ChatState,
+  message: string,
+  attachments?: ChatAttachment[],
+): Promise<string | null> {
+  if (!state.client || !state.connected) {
+    return null;
+  }
+  const msg = message.trim();
+  const hasAttachments = attachments && attachments.length > 0;
+  if (!msg && !hasAttachments) {
+    return null;
+  }
+  state.lastError = null;
+  const runId = generateUUID();
+  try {
+    await requestChatSend(state, { message: msg, attachments, runId });
+    return runId;
+  } catch (err) {
+    state.lastError = formatConnectError(err);
+    return null;
   }
 }
 
