@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as configPresence from "../../../channels/config-presence.js";
 import * as manifestRegistry from "../../../plugins/manifest-registry.js";
-import type { PluginManifestRegistry } from "../../../plugins/manifest-registry.js";
 import { scanConfiguredChannelPluginBlockers } from "./channel-plugin-blockers.js";
 
 describe("channel plugin blockers", () => {
@@ -32,25 +31,17 @@ describe("channel plugin blockers", () => {
 
   it("still evaluates configured channels when plugins are disabled globally", () => {
     vi.spyOn(configPresence, "listPotentialConfiguredChannelIds").mockReturnValue(["slack"]);
-    const registry: PluginManifestRegistry = {
+    vi.spyOn(manifestRegistry, "loadPluginManifestRegistry").mockReturnValue({
       plugins: [
         {
           id: "slack",
           origin: "bundled",
           channels: ["slack"],
-          providers: [],
-          cliBackends: [],
-          skills: [],
-          hooks: [],
-          rootDir: "/tmp/slack",
-          source: "bundled:slack",
-          manifestPath: "/tmp/slack/openclaw.plugin.json",
           enabledByDefault: true,
         },
       ],
       diagnostics: [],
-    };
-    vi.spyOn(manifestRegistry, "loadPluginManifestRegistry").mockReturnValue(registry);
+    } as unknown as ReturnType<typeof manifestRegistry.loadPluginManifestRegistry>);
 
     const hits = scanConfiguredChannelPluginBlockers({
       plugins: {
