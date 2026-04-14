@@ -2548,7 +2548,9 @@ describe("gateway server sessions", () => {
     expect(deleted.ok).toBe(true);
     expect(deleted.payload?.deleted).toBe(true);
     expect(subagentLifecycleHookMocks.runSubagentEnded).toHaveBeenCalledTimes(1);
-    const event = (subagentLifecycleHookMocks.runSubagentEnded.mock.calls as unknown[][])[0]?.[0] as
+    const event = (
+      subagentLifecycleHookMocks.runSubagentEnded.mock.calls as unknown[][]
+    )[0]?.[0] as
       | { targetKind?: string; targetSessionKey?: string; reason?: string; outcome?: string }
       | undefined;
     expect(event).toMatchObject({
@@ -2864,7 +2866,9 @@ describe("gateway server sessions", () => {
     expect(reset.payload?.key).toBe("agent:main:subagent:worker");
     expect(reset.payload?.entry.sessionId).not.toBe("sess-subagent");
     expect(subagentLifecycleHookMocks.runSubagentEnded).toHaveBeenCalledTimes(1);
-    const event = (subagentLifecycleHookMocks.runSubagentEnded.mock.calls as unknown[][])[0]?.[0] as
+    const event = (
+      subagentLifecycleHookMocks.runSubagentEnded.mock.calls as unknown[][]
+    )[0]?.[0] as
       | { targetKind?: string; targetSessionKey?: string; reason?: string; outcome?: string }
       | undefined;
     expect(event).toMatchObject({
@@ -2926,10 +2930,25 @@ describe("gateway server sessions", () => {
       reason: "new",
     });
     expect(reset.ok).toBe(true);
-    expect(sessionHookMocks.triggerInternalHook).toHaveBeenCalledTimes(1);
-    const event = (
+    const resetHookEvents = (
       sessionHookMocks.triggerInternalHook.mock.calls as unknown as Array<[unknown]>
-    )[0]?.[0] as { context?: { previousSessionEntry?: unknown } } | undefined;
+    )
+      .map((call) => call[0])
+      .filter(
+        (
+          event,
+        ): event is {
+          type: string;
+          action: string;
+          context?: { previousSessionEntry?: unknown };
+        } =>
+          Boolean(event) &&
+          typeof event === "object" &&
+          (event as { type?: unknown }).type === "command" &&
+          (event as { action?: unknown }).action === "new",
+      );
+    expect(resetHookEvents).toHaveLength(1);
+    const event = resetHookEvents[0];
     if (!event) {
       throw new Error("expected session hook event");
     }

@@ -90,7 +90,7 @@ describe("models cli", () => {
     },
   ])("passes --agent to github copilot login ($label)", async ({ args }) => {
     await runModelsCommand(args);
-    expect(githubCopilotLoginCommand).toHaveBeenCalledWith(
+    expect(modelsAuthLoginCommand).toHaveBeenCalledWith(
       expect.objectContaining({ agent: "ops" }),
       expect.any(Object),
     );
