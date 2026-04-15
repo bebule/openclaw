@@ -2838,6 +2838,8 @@ describe("buildAfterTurnRuntimeContext", () => {
       },
       workspaceDir: "/tmp/workspace",
       agentDir: "/tmp/agent",
+      tokenBudget: 1050000,
+      currentTokenCount: 232393,
     });
 
     expect(legacy).toMatchObject({
@@ -2846,6 +2848,8 @@ describe("buildAfterTurnRuntimeContext", () => {
       model: "gpt-5.4",
       workspaceDir: "/tmp/workspace",
       agentDir: "/tmp/agent",
+      tokenBudget: 1050000,
+      currentTokenCount: 232393,
     });
   });
 
