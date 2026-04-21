@@ -5,12 +5,15 @@ services:
       HOME: /home/node
       TERM: xterm-256color
       OPENCLAW_GATEWAY_TOKEN: ${OPENCLAW_GATEWAY_TOKEN:-}
+      OPENCLAW_PUBLISHED_GATEWAY_PORT: ${OPENCLAW_GATEWAY_PORT:-127.0.0.1:18789}
       OPENCLAW_ALLOW_INSECURE_PRIVATE_WS: ${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}
       CLAUDE_AI_SESSION_KEY: ${CLAUDE_AI_SESSION_KEY:-}
       CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
       BRAVE_API_KEY: ${BRAVE_API_KEY:-}
       TZ: ${OPENCLAW_TZ:-UTC}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
@@ -69,6 +72,8 @@ services:
       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
       BRAVE_API_KEY: ${BRAVE_API_KEY:-}
       TZ: ${OPENCLAW_TZ:-UTC}
+      BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     volumes:
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace

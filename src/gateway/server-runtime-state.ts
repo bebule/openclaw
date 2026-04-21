@@ -68,8 +68,8 @@ export function shouldWarnOnNonLoopbackBind(params: {
     return false;
   }
   const env = params.env ?? process.env;
-  // Docker Compose may still require an internal non-loopback bind even when
-  // the published host port stays loopback-only.
+  // Docker Compose commonly needs an internal lan bind so published ports work,
+  // but a 127.0.0.1 host publish still keeps the surface loopback-only.
   if (isLoopbackPublishedGatewayPortHint(env.OPENCLAW_PUBLISHED_GATEWAY_PORT)) {
     return false;
   }

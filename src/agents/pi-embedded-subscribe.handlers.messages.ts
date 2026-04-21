@@ -93,6 +93,13 @@ function resolveAssistantStreamItemId(params: {
   return undefined;
 }
 
+function shouldIgnoreAssistantReplyMessage(message: AgentMessage | undefined): boolean {
+  return (
+    isTranscriptOnlyOpenClawAssistantMessage(message) ||
+    resolveAssistantMessagePhase(message) === "commentary"
+  );
+}
+
 function emitReasoningEnd(ctx: EmbeddedPiSubscribeContext) {
   if (!ctx.state.reasoningStreamOpen) {
     return;
@@ -260,7 +267,7 @@ export function handleMessageStart(
   evt: AgentEvent & { message: AgentMessage },
 ) {
   const msg = evt.message;
-  if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
+  if (msg?.role !== "assistant" || shouldIgnoreAssistantReplyMessage(msg)) {
     return;
   }
 
@@ -279,7 +286,7 @@ export function handleMessageUpdate(
   evt: AgentEvent & { message: AgentMessage; assistantMessageEvent?: unknown },
 ) {
   const msg = evt.message;
-  if (msg?.role !== "assistant" || isTranscriptOnlyOpenClawAssistantMessage(msg)) {
+  if (msg?.role !== "assistant" || shouldIgnoreAssistantReplyMessage(msg)) {
     return;
   }
 
