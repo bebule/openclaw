@@ -4,7 +4,7 @@ export type {
   CliBackendPlugin,
   CliBackendPreparedExecution,
   CliBackendPrepareExecutionContext,
-} from "../plugins/types.js";
+} from "../plugins/cli-backend.types.js";
 export {
   CLI_FRESH_WATCHDOG_DEFAULTS,
   CLI_RESUME_WATCHDOG_DEFAULTS,

@@ -1,10 +1,15 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  LLMock,
-  type ChatCompletionRequest,
-  type JournalEntry,
-  type Mountable,
-} from "@copilotkit/aimock";
+import { LLMock, type JournalEntry, type Mountable } from "@copilotkit/aimock";
+
+type AimockChatCompletionBody = {
+  messages?: unknown;
+  model?: unknown;
+};
+
+type AimockChatMessage = {
+  role?: unknown;
+  content?: unknown;
+};
 
 type AimockRequestSnapshot = {
   raw: string;
@@ -53,11 +58,15 @@ function stringifyContent(content: unknown): string {
   return "";
 }
 
-function requestMessages(body: ChatCompletionRequest | null | undefined) {
-  return Array.isArray(body?.messages) ? body.messages : [];
+function asAimockChatCompletionBody(value: unknown): AimockChatCompletionBody | null {
+  return value && typeof value === "object" ? (value as AimockChatCompletionBody) : null;
 }
 
-function extractLastUserText(body: ChatCompletionRequest | null | undefined) {
+function requestMessages(body: AimockChatCompletionBody | null | undefined): AimockChatMessage[] {
+  return Array.isArray(body?.messages) ? (body.messages as AimockChatMessage[]) : [];
+}
+
+function extractLastUserText(body: AimockChatCompletionBody | null | undefined) {
   const messages = requestMessages(body);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -68,14 +77,14 @@ function extractLastUserText(body: ChatCompletionRequest | null | undefined) {
   return "";
 }
 
-function extractAllInputText(body: ChatCompletionRequest | null | undefined) {
+function extractAllInputText(body: AimockChatCompletionBody | null | undefined) {
   return requestMessages(body)
     .map((message) => stringifyContent(message.content))
     .filter(Boolean)
     .join("\n");
 }
 
-function extractToolOutput(body: ChatCompletionRequest | null | undefined) {
+function extractToolOutput(body: AimockChatCompletionBody | null | undefined) {
   const messages = requestMessages(body);
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
@@ -131,7 +140,7 @@ function extractPlannedToolName(entry: JournalEntry) {
 }
 
 function toRequestSnapshot(entry: JournalEntry): AimockRequestSnapshot {
-  const body = entry.body ?? null;
+  const body = asAimockChatCompletionBody(entry.body);
   const model = typeof body?.model === "string" ? body.model : "";
   return {
     raw: JSON.stringify(body ?? {}),
