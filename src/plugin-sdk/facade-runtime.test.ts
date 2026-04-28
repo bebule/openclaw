@@ -6,8 +6,13 @@ import { createPluginActivationSource, normalizePluginsConfig } from "../plugins
 import { clearPluginDiscoveryCache } from "../plugins/discovery.js";
 import { clearPluginManifestRegistryCache } from "../plugins/manifest-registry.js";
 import {
+  evaluateBundledPluginPublicSurfaceAccess,
+  resetFacadeActivationCheckRuntimeStateForTest,
+  resolveBundledPluginPublicSurfaceAccess as resolveActivationCheckBundledPluginPublicSurfaceAccess,
+  throwForBundledPluginPublicSurfaceAccess,
+} from "./facade-activation-check.runtime.js";
+import {
   __testing,
-  canLoadActivatedBundledPluginPublicSurface,
   listImportedBundledPluginFacadeIds,
   loadBundledPluginPublicSurfaceModuleSync,
   resetFacadeRuntimeStateForTest,
@@ -20,6 +25,7 @@ import {
 
 const { createTempDirSync } = createPluginSdkTestHarness();
 const originalBundledPluginsDir = process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
+const originalDisableBundledPlugins = process.env.OPENCLAW_DISABLE_BUNDLED_PLUGINS;
 const originalStateDir = process.env.OPENCLAW_STATE_DIR;
 
 function createBundledPluginDir(prefix: string, marker: string): string {
@@ -34,6 +40,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   clearRuntimeConfigSnapshot();
   resetFacadeRuntimeStateForTest();
+  resetFacadeActivationCheckRuntimeStateForTest();
   clearPluginDiscoveryCache();
   clearPluginManifestRegistryCache();
   vi.doUnmock("../plugins/manifest-registry.js");
@@ -41,6 +48,11 @@ afterEach(() => {
     delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
   } else {
     process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = originalBundledPluginsDir;
+  }
+  if (originalDisableBundledPlugins === undefined) {
+    delete process.env.OPENCLAW_DISABLE_BUNDLED_PLUGINS;
+  } else {
+    process.env.OPENCLAW_DISABLE_BUNDLED_PLUGINS = originalDisableBundledPlugins;
   }
   if (originalStateDir === undefined) {
     delete process.env.OPENCLAW_STATE_DIR;
@@ -73,6 +85,32 @@ describe("plugin-sdk facade runtime", () => {
       modulePath: path.join(overrideB, "demo", "api.js"),
       boundaryRoot: overrideB,
     });
+  });
+
+  it("falls back to package source surfaces when an override dir is partial", () => {
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = createTempDirSync("openclaw-facade-runtime-empty-");
+
+    expect(
+      __testing.resolveFacadeModuleLocation({
+        dirName: "browser",
+        artifactBasename: "browser-maintenance.js",
+      }),
+    ).toEqual({
+      modulePath: path.resolve("extensions/browser/browser-maintenance.ts"),
+      boundaryRoot: path.resolve("."),
+    });
+  });
+
+  it("does not fall back to package source surfaces when bundled plugins are disabled", () => {
+    process.env.OPENCLAW_DISABLE_BUNDLED_PLUGINS = "1";
+    delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
+
+    expect(
+      __testing.resolveFacadeModuleLocation({
+        dirName: "browser",
+        artifactBasename: "browser-maintenance.js",
+      }),
+    ).toBeNull();
   });
 
   it("returns the same object identity on repeated calls (sentinel consistency)", () => {
@@ -180,7 +218,7 @@ describe("plugin-sdk facade runtime", () => {
   });
 
   it("blocks runtime-api facade loads for bundled plugins that are not activated", () => {
-    const access = __testing.evaluateBundledPluginPublicSurfaceAccess({
+    const access = evaluateBundledPluginPublicSurfaceAccess({
       params: {
         dirName: "discord",
         artifactBasename: "runtime-api.js",
@@ -202,7 +240,7 @@ describe("plugin-sdk facade runtime", () => {
     expect(access.pluginId).toBe("discord");
     expect(access.reason).toBeTruthy();
     expect(() =>
-      __testing.throwForBundledPluginPublicSurfaceAccess({
+      throwForBundledPluginPublicSurfaceAccess({
         access,
         request: {
           dirName: "discord",
@@ -230,7 +268,7 @@ describe("plugin-sdk facade runtime", () => {
         },
       },
     } as const;
-    const access = __testing.evaluateBundledPluginPublicSurfaceAccess({
+    const access = evaluateBundledPluginPublicSurfaceAccess({
       params: {
         dirName: "discord",
         artifactBasename: "runtime-api.js",
@@ -362,23 +400,67 @@ describe("plugin-sdk facade runtime", () => {
   it("keeps shared runtime-core facades available without plugin activation", () => {
     setRuntimeConfigSnapshot({});
 
-    expect(
-      canLoadActivatedBundledPluginPublicSurface({
-        dirName: "speech-core",
-        artifactBasename: "runtime-api.js",
+    for (const dirName of ["speech-core", "image-generation-core", "media-understanding-core"]) {
+      expect(
+        resolveActivationCheckBundledPluginPublicSurfaceAccess({
+          dirName,
+          artifactBasename: "runtime-api.js",
+          location: null,
+          sourceExtensionsRoot: "",
+          resolutionKey: `runtime-core:${dirName}`,
+        }),
+      ).toEqual({
+        allowed: true,
+        pluginId: dirName,
+      });
+    }
+  });
+
+  it("prefers the source runtime snapshot for facade activation checks", () => {
+    const dir = createTempDirSync("openclaw-facade-source-snapshot-");
+    fs.mkdirSync(path.join(dir, "demo"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, "demo", "runtime-api.js"),
+      'export const marker = "source-snapshot";\n',
+      "utf8",
+    );
+    fs.writeFileSync(
+      path.join(dir, "demo", "openclaw.plugin.json"),
+      JSON.stringify({
+        id: "demo",
       }),
-    ).toBe(true);
+      "utf8",
+    );
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = dir;
+    setRuntimeConfigSnapshot(
+      {
+        plugins: {},
+      },
+      {
+        plugins: {
+          entries: {
+            demo: {
+              enabled: true,
+            },
+          },
+        },
+      },
+    );
+
     expect(
-      canLoadActivatedBundledPluginPublicSurface({
-        dirName: "image-generation-core",
+      resolveActivationCheckBundledPluginPublicSurfaceAccess({
+        dirName: "demo",
         artifactBasename: "runtime-api.js",
+        location: {
+          modulePath: path.join(dir, "demo", "runtime-api.js"),
+          boundaryRoot: dir,
+        },
+        sourceExtensionsRoot: dir,
+        resolutionKey: "source-snapshot-demo",
       }),
-    ).toBe(true);
-    expect(
-      canLoadActivatedBundledPluginPublicSurface({
-        dirName: "media-understanding-core",
-        artifactBasename: "runtime-api.js",
-      }),
-    ).toBe(true);
+    ).toEqual({
+      allowed: true,
+      pluginId: "demo",
+    });
   });
 });

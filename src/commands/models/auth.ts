@@ -140,17 +140,18 @@ function listProvidersWithTokenMethods(providers: ProviderPlugin[]): ProviderPlu
 
 async function resolveModelsAuthContext(params?: {
   requestedProvider?: string;
-  rawAgentId?: string;
+  rawAgentId?: string | null;
 }): Promise<ResolvedModelsAuthContext> {
   const config = await loadValidConfigOrThrow();
   const { agentDir, workspaceDir } = resolveAuthTargetContext({
     cfg: config,
-    rawAgentId: params?.rawAgentId,
+    rawAgentId: params?.rawAgentId ?? undefined,
   });
   const providers = resolvePluginProviders({
     config,
     workspaceDir,
     mode: "setup",
+    includeUntrustedWorkspacePlugins: false,
     bundledProviderAllowlistCompat: true,
     bundledProviderVitestCompat: true,
     ...(params?.requestedProvider?.trim()
@@ -163,6 +164,11 @@ async function resolveModelsAuthContext(params?: {
     workspaceDir,
     providers,
   };
+}
+
+async function resolveModelsAuthAgentDir(rawAgentId?: string | null): Promise<string> {
+  const config = await loadValidConfigOrThrow();
+  return resolveAuthTargetContext({ cfg: config, rawAgentId: rawAgentId ?? undefined }).agentDir;
 }
 
 function resolveRequestedProviderOrThrow(
@@ -279,7 +285,9 @@ async function persistProviderAuthResult(params: {
   await updateConfig((cfg) => {
     let next = cfg;
     if (params.result.configPatch) {
-      next = applyProviderAuthConfigPatch(next, params.result.configPatch);
+      next = applyProviderAuthConfigPatch(next, params.result.configPatch, {
+        replaceDefaultModels: params.result.replaceDefaultModels,
+      });
     }
     for (const profile of params.result.profiles) {
       next = applyAuthProfileConfig(next, {
@@ -412,7 +420,7 @@ export async function modelsAuthPasteTokenCommand(
   },
   runtime: RuntimeEnv,
 ) {
-  const { agentDir } = await resolveModelsAuthContext({ rawAgentId: opts.agent });
+  const agentDir = await resolveModelsAuthAgentDir(opts.agent);
   const rawProvider = normalizeOptionalString(opts.provider);
   if (!rawProvider) {
     throw new Error("Missing --provider.");

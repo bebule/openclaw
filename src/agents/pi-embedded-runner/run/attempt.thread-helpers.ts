@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { joinPresentTextSegments } from "../../../shared/text/join-segments.js";
 import { normalizeStructuredPromptSection } from "../../prompt-cache-stability.js";
+import { resolveProviderEndpoint } from "../../provider-attribution.js";
 
 export const ATTEMPT_CACHE_TTL_CUSTOM_TYPE = "openclaw.cache-ttl";
 
@@ -37,27 +38,21 @@ export function resolveAttemptSpawnWorkspaceDir(params: {
     : undefined;
 }
 
-function isOpenAIPublicResponsesBaseUrl(baseUrl?: string | null): boolean {
-  if (baseUrl == null) {
-    return true;
-  }
-  const trimmed = baseUrl.trim();
-  if (!trimmed) {
-    return false;
-  }
-  return /^https?:\/\/api\.openai\.com(?:\/v1)?\/?$/i.test(trimmed);
-}
-
 export function shouldUseOpenAIWebSocketTransport(params: {
   provider: string;
   modelApi?: string | null;
   modelBaseUrl?: string | null;
 }): boolean {
-  return (
-    params.provider === "openai" &&
-    params.modelApi === "openai-responses" &&
-    isOpenAIPublicResponsesBaseUrl(params.modelBaseUrl)
-  );
+  if (params.modelApi !== "openai-responses" || params.provider !== "openai") {
+    return false;
+  }
+
+  // openai-codex normalizes to the ChatGPT backend HTTP path, not the public
+  // OpenAI Responses websocket endpoint. Local mocks, proxies, and custom
+  // baseUrls must stay on HTTP because the websocket runtime targets the
+  // native api.openai.com endpoint directly.
+  const endpointClass = resolveProviderEndpoint(params.modelBaseUrl).endpointClass;
+  return endpointClass === "default" || endpointClass === "openai-public";
 }
 
 export function shouldAppendAttemptCacheTtl(params: {

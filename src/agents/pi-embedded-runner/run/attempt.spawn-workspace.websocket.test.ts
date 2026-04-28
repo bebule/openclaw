@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { shouldUseOpenAIWebSocketTransport } from "./attempt.thread-helpers.js";
 
 describe("openai websocket transport selection", () => {
-  it("accepts the direct OpenAI responses transport pair", () => {
+  it("accepts direct OpenAI Responses endpoints", () => {
+    expect(
+      shouldUseOpenAIWebSocketTransport({
+        provider: "openai",
+        modelApi: "openai-responses",
+        modelBaseUrl: undefined,
+      }),
+    ).toBe(true);
     expect(
       shouldUseOpenAIWebSocketTransport({
         provider: "openai",
@@ -12,41 +19,33 @@ describe("openai websocket transport selection", () => {
     ).toBe(true);
   });
 
-  it("accepts the default OpenAI responses base URL", () => {
+  it("rejects non-public baseUrls even when the provider/api pair matches", () => {
     expect(
       shouldUseOpenAIWebSocketTransport({
         provider: "openai",
         modelApi: "openai-responses",
-      }),
-    ).toBe(true);
-  });
-
-  it("rejects blank OpenAI responses base URLs", () => {
-    expect(
-      shouldUseOpenAIWebSocketTransport({
-        provider: "openai",
-        modelApi: "openai-responses",
-        modelBaseUrl: "",
+        modelBaseUrl: "http://127.0.0.1:4100/v1",
       }),
     ).toBe(false);
-  });
-
-  it("rejects Codex responses transport pairs", () => {
     expect(
       shouldUseOpenAIWebSocketTransport({
-        provider: "openai-codex",
-        modelApi: "openai-codex-responses",
+        provider: "openai",
+        modelApi: "openai-responses",
+        modelBaseUrl: "https://example.com/v1",
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseOpenAIWebSocketTransport({
+        provider: "openai",
+        modelApi: "openai-responses",
         modelBaseUrl: "https://chatgpt.com/backend-api",
       }),
     ).toBe(false);
-  });
-
-  it("rejects proxied OpenAI responses base URLs", () => {
     expect(
       shouldUseOpenAIWebSocketTransport({
         provider: "openai",
         modelApi: "openai-responses",
-        modelBaseUrl: "https://proxy.example.com/v1",
+        modelBaseUrl: "https://example.openai.azure.com/openai/v1",
       }),
     ).toBe(false);
   });
