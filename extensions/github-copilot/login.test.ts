@@ -29,7 +29,7 @@ vi.mock("openclaw/plugin-sdk/provider-auth", () => ({
   applyAuthProfileConfig,
 }));
 
-vi.mock("openclaw/plugin-sdk/config-runtime", () => ({
+vi.mock("openclaw/plugin-sdk/config-mutation", () => ({
   updateConfig,
   logConfigUpdated,
 }));
