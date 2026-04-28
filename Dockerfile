@@ -254,9 +254,29 @@ RUN --mount=type=cache,id=openclaw-bookworm-apt-cache,target=/var/cache/apt,shar
         docker-ce-cli docker-compose-plugin; \
     fi
 
+# Optionally install native provider CLIs for OAuth-backed CLI providers.
+# Build with:
+#   docker build --build-arg OPENCLAW_INSTALL_GEMINI_CLI=1 \
+#     --build-arg OPENCLAW_INSTALL_CLAUDE_CLI=1 ...
+ARG OPENCLAW_INSTALL_GEMINI_CLI=""
+ARG OPENCLAW_INSTALL_CLAUDE_CLI=""
+RUN set -eu; \
+    packages=""; \
+    if [ -n "$OPENCLAW_INSTALL_GEMINI_CLI" ]; then \
+      packages="$packages @google/gemini-cli"; \
+    fi; \
+    if [ -n "$OPENCLAW_INSTALL_CLAUDE_CLI" ]; then \
+      packages="$packages @anthropic-ai/claude-code"; \
+    fi; \
+    if [ -n "$packages" ]; then \
+      npm install -g --no-audit --no-fund --cache=/tmp/openclaw-provider-cli-npm-cache $packages; \
+      rm -rf /tmp/openclaw-provider-cli-npm-cache; \
+    fi
+
 # Expose the CLI binary without requiring npm global writes as non-root.
 RUN ln -sf /app/openclaw.mjs /usr/local/bin/openclaw \
- && chmod 755 /app/openclaw.mjs
+ && chmod 755 /app/openclaw.mjs \
+ && install -d -o node -g node /home/node/.gemini /home/node/.claude /home/node/.npm
 
 ENV NODE_ENV=production
 

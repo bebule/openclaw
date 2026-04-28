@@ -179,10 +179,13 @@ vim ~/.openclaw/.env
 
 See `.env.example` for all supported keys.
 
-The `Dockerfile` supports two optional build args:
+The `Dockerfile` supports these optional build args:
 
 - `OPENCLAW_DOCKER_APT_PACKAGES` — extra apt packages to install (e.g. `ffmpeg`)
 - `OPENCLAW_INSTALL_BROWSER=1` — pre-install Chromium for browser automation (adds ~300MB, but skips the 60-90s Playwright install on each container start)
+- `OPENCLAW_INSTALL_CLAUDE_CLI=1` — pre-install Claude Code for `claude-cli` providers
+- `OPENCLAW_INSTALL_DOCKER_CLI=1` — pre-install Docker CLI for sandbox container management
+- `OPENCLAW_INSTALL_GEMINI_CLI=1` — pre-install Gemini CLI for `google-gemini-cli` providers
 
 ### How It Works in Docker
 

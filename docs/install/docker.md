@@ -136,8 +136,18 @@ The setup script accepts these optional environment variables:
 | `OPENCLAW_EXTENSIONS`          | Pre-install extension deps at build time (space-separated names) |
 | `OPENCLAW_EXTRA_MOUNTS`        | Extra host bind mounts (comma-separated `source:target[:opts]`)  |
 | `OPENCLAW_HOME_VOLUME`         | Persist `/home/node` in a named Docker volume                    |
+| `OPENCLAW_INSTALL_CLAUDE_CLI`  | Pre-install Claude Code for `claude-cli` providers               |
+| `OPENCLAW_INSTALL_DOCKER_CLI`  | Pre-install Docker CLI for sandbox container management          |
+| `OPENCLAW_INSTALL_GEMINI_CLI`  | Pre-install Gemini CLI for `google-gemini-cli` providers         |
 | `OPENCLAW_SANDBOX`             | Opt in to sandbox bootstrap (`1`, `true`, `yes`, `on`)           |
 | `OPENCLAW_DOCKER_SOCKET`       | Override Docker socket path                                      |
+
+To bake OAuth-backed CLI providers into a local image, set the matching build
+args before running the setup script:
+
+```bash
+OPENCLAW_INSTALL_CLAUDE_CLI=1 OPENCLAW_INSTALL_GEMINI_CLI=1 ./scripts/docker/setup.sh
+```
 
 ### Health checks
 

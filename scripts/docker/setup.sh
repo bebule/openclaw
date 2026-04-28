@@ -278,6 +278,8 @@ export OPENCLAW_GATEWAY_BIND="${OPENCLAW_GATEWAY_BIND:-lan}"
 export OPENCLAW_IMAGE="$IMAGE_NAME"
 export OPENCLAW_DOCKER_APT_PACKAGES="${OPENCLAW_DOCKER_APT_PACKAGES:-}"
 export OPENCLAW_EXTENSIONS="${OPENCLAW_EXTENSIONS:-}"
+export OPENCLAW_INSTALL_GEMINI_CLI="${OPENCLAW_INSTALL_GEMINI_CLI:-}"
+export OPENCLAW_INSTALL_CLAUDE_CLI="${OPENCLAW_INSTALL_CLAUDE_CLI:-}"
 export OPENCLAW_EXTRA_MOUNTS="$EXTRA_MOUNTS"
 export OPENCLAW_HOME_VOLUME="$HOME_VOLUME_NAME"
 export OPENCLAW_ALLOW_INSECURE_PRIVATE_WS="${OPENCLAW_ALLOW_INSECURE_PRIVATE_WS:-}"
@@ -468,6 +470,8 @@ upsert_env "$ENV_FILE" \
   OPENCLAW_DOCKER_SOCKET \
   DOCKER_GID \
   OPENCLAW_INSTALL_DOCKER_CLI \
+  OPENCLAW_INSTALL_GEMINI_CLI \
+  OPENCLAW_INSTALL_CLAUDE_CLI \
   OPENCLAW_ALLOW_INSECURE_PRIVATE_WS \
   OPENCLAW_TZ
 
@@ -477,6 +481,8 @@ if [[ "$IMAGE_NAME" == "openclaw:local" ]]; then
     --build-arg "OPENCLAW_DOCKER_APT_PACKAGES=${OPENCLAW_DOCKER_APT_PACKAGES}" \
     --build-arg "OPENCLAW_EXTENSIONS=${OPENCLAW_EXTENSIONS}" \
     --build-arg "OPENCLAW_INSTALL_DOCKER_CLI=${OPENCLAW_INSTALL_DOCKER_CLI:-}" \
+    --build-arg "OPENCLAW_INSTALL_GEMINI_CLI=${OPENCLAW_INSTALL_GEMINI_CLI:-}" \
+    --build-arg "OPENCLAW_INSTALL_CLAUDE_CLI=${OPENCLAW_INSTALL_CLAUDE_CLI:-}" \
     -t "$IMAGE_NAME" \
     -f "$ROOT_DIR/Dockerfile" \
     "$ROOT_DIR"
@@ -502,7 +508,10 @@ echo "==> Fixing data-directory permissions"
 # (.openclaw/) inside the workspace gets chowned, not the user's project files.
 run_prestart_gateway --user root --entrypoint sh openclaw-gateway -c \
   'find /home/node/.openclaw -xdev -exec chown node:node {} +; \
-   [ -d /home/node/.openclaw/workspace/.openclaw ] && chown -R node:node /home/node/.openclaw/workspace/.openclaw || true'
+   [ -d /home/node/.openclaw/workspace/.openclaw ] && chown -R node:node /home/node/.openclaw/workspace/.openclaw || true; \
+   [ -d /home/node/.gemini ] && chown node:node /home/node/.gemini || true; \
+   [ -d /home/node/.claude ] && chown node:node /home/node/.claude || true; \
+   [ -d /home/node/.npm ] && chown -R node:node /home/node/.npm || true'
 
 echo ""
 echo "==> Onboarding (interactive)"

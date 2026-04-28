@@ -11,9 +11,18 @@ services:
       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
       BRAVE_API_KEY: ${BRAVE_API_KEY:-}
       TZ: ${OPENCLAW_TZ:-UTC}
+    group_add:
+      - "${OPENCLAW_HOST_GID:-20}"
     volumes:
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
+      # Share host CLI auth so gemini/claude providers reuse existing OAuth
+      # without re-login inside the container. File-level mounts only.
+      - ${HOME}/.gemini/oauth_creds.json:/home/node/.gemini/oauth_creds.json
+      - ${HOME}/.gemini/settings.json:/home/node/.gemini/settings.json
+      - ${HOME}/.gemini/google_accounts.json:/home/node/.gemini/google_accounts.json
+      - ${HOME}/.claude.json:/home/node/.claude.json
+      - ${HOME}/.claude/.credentials.json:/home/node/.claude/.credentials.json
       ## Uncomment the lines below to enable sandbox isolation
       ## (agents.defaults.sandbox). Requires Docker CLI in the image
       ## (build with --build-arg OPENCLAW_INSTALL_DOCKER_CLI=1) or use
@@ -69,9 +78,16 @@ services:
       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
       BRAVE_API_KEY: ${BRAVE_API_KEY:-}
       TZ: ${OPENCLAW_TZ:-UTC}
+    group_add:
+      - "${OPENCLAW_HOST_GID:-20}"
     volumes:
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
+      - ${HOME}/.gemini/oauth_creds.json:/home/node/.gemini/oauth_creds.json
+      - ${HOME}/.gemini/settings.json:/home/node/.gemini/settings.json
+      - ${HOME}/.gemini/google_accounts.json:/home/node/.gemini/google_accounts.json
+      - ${HOME}/.claude.json:/home/node/.claude.json
+      - ${HOME}/.claude/.credentials.json:/home/node/.claude/.credentials.json
     stdin_open: true
     tty: true
     init: true
