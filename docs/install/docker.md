@@ -125,6 +125,22 @@ and setup-time config writes through `openclaw-gateway` with
 `--no-deps --entrypoint node`.
 </Note>
 
+### Host-side model auth for Docker state
+
+Because Docker Compose bind-mounts `OPENCLAW_CONFIG_DIR` into the container, you can run
+interactive model auth on the host and still update the same `openclaw.json` and
+`auth-profiles.json` files that the container uses.
+
+Use the helper script from the repo root:
+
+```bash
+OPENCLAW_CONFIG_DIR=~/.openclaw \
+  scripts/docker-host-model-auth.sh login --provider openai-codex --set-default
+```
+
+The script points host-side CLI commands at the bind-mounted state directory and targets the
+default `main` agent unless you override `OPENCLAW_DOCKER_AUTH_AGENT_ID`.
+
 ### Environment variables
 
 The setup script accepts these optional environment variables:
@@ -168,15 +184,30 @@ Authenticated deep health snapshot:
 docker compose exec openclaw-gateway node dist/index.js health --token "$OPENCLAW_GATEWAY_TOKEN"
 ```
 
-### LAN vs loopback
+### LAN vs loopback (Docker Compose)
 
 `docker-compose.yml` publishes the gateway ports to loopback by default, and
 `scripts/docker/setup.sh` defaults `OPENCLAW_GATEWAY_BIND=lan` inside the
-container so host access to `http://127.0.0.1:18789` still works.
+container so host access to `http://127.0.0.1:18789` still works:
 
-- `lan` (default): host browser and host CLI can reach the published gateway port.
-- `loopback`: only processes inside the container network namespace can reach
-  the gateway directly.
+- `OPENCLAW_GATEWAY_PORT=127.0.0.1:18789`
+- `OPENCLAW_BRIDGE_PORT=127.0.0.1:18790`
+
+- Internal `lan` bind (default): required for the containerized gateway to
+  answer Docker-published traffic.
+- Internal `loopback`: usually breaks host `127.0.0.1:18789` access with normal
+  Docker Compose port publishing.
+- Host loopback publish (default): browser + CLI on the host can reach
+  `http://127.0.0.1:18789`, but the gateway is not exposed on the host LAN.
+
+To intentionally expose Docker on the host LAN, set explicit host publish
+targets before running `./scripts/docker/setup.sh`:
+
+```bash
+export OPENCLAW_GATEWAY_PORT=18789
+export OPENCLAW_BRIDGE_PORT=18790
+./scripts/docker/setup.sh
+```
 
 If you want LAN-visible host publishing, set explicit host mappings before
 starting Compose, for example `OPENCLAW_GATEWAY_PORT=18789` and
@@ -220,6 +251,11 @@ If you installed ClawDock from the older `scripts/shell-helpers/clawdock-helpers
 Then use `clawdock-start`, `clawdock-stop`, `clawdock-dashboard`, etc. Run
 `clawdock-help` for all commands.
 See [ClawDock](/install/clawdock) for the full helper guide.
+
+- Docker defaults to loopback-only host port publishing, while the container
+  keeps `gateway.bind=lan` so Docker bridge traffic can reach the service.
+- Dockerfile CMD uses `--allow-unconfigured`; mounted config with `gateway.mode` not `local` will still start. Override CMD to enforce the guard.
+- The gateway container is the source of truth for sessions (`~/.openclaw/agents/<agentId>/sessions/`).
 
 <AccordionGroup>
   <Accordion title="Enable agent sandbox for Docker gateway">
